@@ -33,7 +33,7 @@ Deep Research Agent is a multi-agent AI system that automates advanced research 
 
 Clone this repository and set up a Python environment:
 ```
-git clone [https://github.com/Aidin-Sahneh/deep-research-agent.git](https://github.com/Aidin-Sahneh/deep-research-agent.git)  
+git clone https://github.com/Aidin-Sahneh/deep-research-agent.git  
 cd deep-research-agent  
 python -m venv venv  
 source venv/bin/activate # On Windows use: venv\Scripts\activate  
@@ -98,13 +98,6 @@ deep-research-agent/
 python test_email.py # Tests Resend API key  
 python deep_research_agent.py # Runs a sample research workflow  
 ```
-## Contributing
-
-Contributions are welcome:  
-1. Fork the repository  
-2. Create a feature branch  
-3. Commit your changes with descriptive messages  
-4. Open a pull request for review  
 
 ## License
 
