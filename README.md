@@ -32,28 +32,29 @@ Deep Research Agent is a multi-agent AI system that automates advanced research 
 ## Installation
 
 Clone this repository and set up a Python environment:
-
-git clone https://github.com/Aidin-Sahneh/deep-research-agent.git
-cd deep-research-agent
-python -m venv venv
-source venv/bin/activate # On Windows use: venv\Scripts\activate
-pip install -r requirements.txt
-
-
+```
+git clone [https://github.com/Aidin-Sahneh/deep-research-agent.git](https://github.com/Aidin-Sahneh/deep-research-agent.git)  
+cd deep-research-agent  
+python -m venv venv  
+source venv/bin/activate # On Windows use: venv\Scripts\activate  
+pip install -r requirements.txt  
+```
 Copy `.env.example` to `.env` and fill in your API keys.
 
 ## Usage
 
 ### Web Interface
 
-python app.py
+`python app.py`
 
-Then open http://127.0.0.1:7860 in your browser.
+Then open [http://127.0.0.1:7860](http://127.0.0.1:7860) in your browser.
 
 ### Command Line
-python deep_research_agent.py
+`python deep_research_agent.py`
 
 ### Python API Example
+
+```
 from deep_research_agent import deep_research
 import asyncio
 
@@ -65,7 +66,7 @@ send_via_email=False
 print(report)
 
 asyncio.run(main())
-
+```
 
 ## Configuration
 
@@ -85,25 +86,25 @@ deep-research-agent/
 └─ demo.gif
 ```
 
+
 ## Cost Considerations
 
 - This project uses OpenAI API, billing is usage-based.
 - Each research may cost $0.05–$0.15 depending on tokens used and model selected.
-- Monitor your usage at https://platform.openai.com/usage
+- Monitor your usage at [https://platform.openai.com/usage](https://platform.openai.com/usage)
 
 ## Testing
-
-python test_email.py # Tests Resend API key
-python deep_research_agent.py # Runs a sample research workflow
-
-
+```
+python test_email.py # Tests Resend API key  
+python deep_research_agent.py # Runs a sample research workflow  
+```
 ## Contributing
 
-Contributions are welcome:
-1. Fork the repository
-2. Create a feature branch
-3. Commit your changes with descriptive messages
-4. Open a pull request for review
+Contributions are welcome:  
+1. Fork the repository  
+2. Create a feature branch  
+3. Commit your changes with descriptive messages  
+4. Open a pull request for review  
 
 ## License
 
@@ -112,6 +113,6 @@ MIT License. See [LICENSE](LICENSE) for details.
 ## Contact
 
 Author: Aidin Sahneh  
-Email: aidinsahneh19@gmail.com  
+Email: [aidinsahneh19@gmail.com](mailto:aidinsahneh19@gmail.com)  
 GitHub: [Aidin-Sahneh](https://github.com/Aidin-Sahneh)  
-Project page: https://github.com/Aidin-Sahneh/deep-research-agent
+Project page: [https://github.com/Aidin-Sahneh/deep-research-agent](https://github.com/Aidin-Sahneh/deep-research-agent)
