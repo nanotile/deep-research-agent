@@ -113,5 +113,6 @@ MIT License. See [LICENSE](LICENSE) for details.
 ## Contact
 
 Author: [Aidin-Sahneh](https://github.com/Aidin-Sahneh)
+
 Email: [aidinsahneh19@gmail.com](mailto:aidinsahneh19@gmail.com)  
   
