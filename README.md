@@ -112,7 +112,6 @@ MIT License. See [LICENSE](LICENSE) for details.
 
 ## Contact
 
-Author: Aidin Sahneh  
+Author: [Aidin-Sahneh](https://github.com/Aidin-Sahneh)
 Email: [aidinsahneh19@gmail.com](mailto:aidinsahneh19@gmail.com)  
-GitHub: [Aidin-Sahneh](https://github.com/Aidin-Sahneh)  
-Project page: [https://github.com/Aidin-Sahneh/deep-research-agent](https://github.com/Aidin-Sahneh/deep-research-agent)
+  
