@@ -73,7 +73,7 @@ asyncio.run(main())
 - `deep_research_agent.py` exposes configuration variables such as search count and model selection.
 
 ## Project Structure
-
+```
 deep-research-agent/
 ├─ app.py # Gradio web interface
 ├─ deep_research_agent.py # Main research logic
@@ -83,7 +83,7 @@ deep-research-agent/
 ├─ LICENSE
 ├─ README.md
 └─ demo.gif
-
+```
 
 ## Cost Considerations
 
