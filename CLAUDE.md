@@ -28,7 +28,7 @@ python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 cp .env.example .env
-# Edit .env with your OPENAI_API_KEY and RESEND_API_KEY
+# Edit .env with your ANTHROPIC_API_KEY and RESEND_API_KEY
 ```
 
 ## Multi-Agent Architecture
@@ -55,7 +55,7 @@ async def deep_research(
 ### Key Configuration (in `deep_research_agent.py`)
 
 - `HOW_MANY_SEARCHES = 3` - Number of search queries to generate
-- `MODEL = "gpt-4o-mini"` - OpenAI model (can change to `"gpt-4"`)
+- `MODEL = "claude-sonnet-4-20250514"` - Anthropic model (can change to `"claude-opus-4-20250514"`)
 
 ### Pydantic Models for Structured Output
 
@@ -71,7 +71,7 @@ async def deep_research(
 
 ## API Dependencies
 
-- **Required**: OpenAI API key (all LLM operations)
+- **Required**: Anthropic API key (all LLM operations)
 - **Optional**: Resend API key (email delivery only)
 
 ## Cost Considerations
