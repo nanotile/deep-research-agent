@@ -37,3 +37,7 @@ test_output/
 
 # Git
 .git/
+
+# User-specific/temp files
+Untitled-1.yaml
+my_vm_config.json
