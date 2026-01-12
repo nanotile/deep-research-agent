@@ -121,8 +121,8 @@ if __name__ == "__main__":
     print("🌐 Starting Gradio Web Interface...")
     print("="*70)
     demo.launch(
-        server_name="127.0.0.1",  # localhost only
+        server_name="0.0.0.0",  # Allow external access
         server_port=7860,
-        share=False,  # Set to True if you want a public URL
+        share=False,
         show_error=True
     )
