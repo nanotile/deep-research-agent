@@ -78,8 +78,8 @@ with gr.Blocks(theme=gr.themes.Soft(), title="Deep Research Agent") as demo:
             4. Optionally send via email
             
             ### ⚙️ Requirements
-            
-            - OpenAI API key in `.env`
+
+            - Anthropic API key in `.env`
             - Resend API key (for email)
             - Internet connection
             
@@ -111,7 +111,7 @@ with gr.Blocks(theme=gr.themes.Soft(), title="Deep Research Agent") as demo:
     # Footer
     gr.Markdown("""
     ---
-    **Note:** This agent uses OpenAI's API and consumes tokens. Each research typically uses 5,000-15,000 tokens (~$0.05-$0.15).
+    **Note:** This agent uses Anthropic's Claude API and consumes tokens. Each research typically uses 5,000-15,000 tokens (~$0.05-$0.15).
     
     """)
 

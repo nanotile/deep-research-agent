@@ -1,6 +1,6 @@
 # Deep Research Agent
 
-Deep Research Agent is a multi-agent AI system that automates advanced research and report generation using OpenAI's models. This project features an asynchronous architecture with specialized agents for planning, research, report synthesis, and email delivery. The application includes a modern Gradio web interface and a CLI for research management.
+Deep Research Agent is a multi-agent AI system that automates advanced research and report generation using Anthropic's Claude models. This project features an asynchronous architecture with specialized agents for planning, research, report synthesis, and email delivery. The application includes a modern Gradio web interface and a CLI for research management.
 
 ![Demo GIF](demo.gif)
 
@@ -70,7 +70,7 @@ asyncio.run(main())
 
 ## Configuration
 
-- Edit `.env` to set your `OPENAI_API_KEY` and `RESEND_API_KEY`.
+- Edit `.env` to set your `ANTHROPIC_API_KEY` and `RESEND_API_KEY`.
 - `deep_research_agent.py` exposes configuration variables such as search count and model selection.
 
 ## Project Structure
@@ -89,9 +89,9 @@ deep-research-agent/
 
 ## Cost Considerations
 
-- This project uses OpenAI API, billing is usage-based.
+- This project uses Anthropic's Claude API, billing is usage-based.
 - Each research may cost $0.05–$0.15 depending on tokens used and model selected.
-- Monitor your usage at [https://platform.openai.com/usage](https://platform.openai.com/usage)
+- Monitor your usage at [https://console.anthropic.com/](https://console.anthropic.com/)
 
 ## Testing
 ```

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Deep Research Agent is a multi-agent AI system that automates research and report generation using OpenAI's API. The system uses an asynchronous architecture with four specialized agents that work in sequence: Planning, Research, Report Writing, and Email Delivery.
+Deep Research Agent is a multi-agent AI system that automates research and report generation using Anthropic's Claude API. The system uses an asynchronous architecture with four specialized agents that work in sequence: Planning, Research, Report Writing, and Email Delivery.
 
 ## Core Commands
 
@@ -67,7 +67,7 @@ async def deep_research(
 - Wraps `deep_research()` with sync/async bridge via `asyncio.run()`
 - Input: query text, email checkbox, recipient email
 - Output: Rendered markdown report
-- Port 7860, localhost only by default
+- Port 7860, binds to 0.0.0.0 for external access
 
 ## API Dependencies
 
@@ -78,7 +78,7 @@ async def deep_research(
 
 - ~$0.05-$0.15 per research run
 - 5,000-15,000 tokens per query
-- Monitor at https://platform.openai.com/usage
+- Monitor at https://console.anthropic.com/
 
 ## VM Networking Utilities (GCP)
 
