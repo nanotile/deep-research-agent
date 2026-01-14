@@ -11,6 +11,9 @@ Deep Research Agent is a multi-agent AI system that automates research and repor
 ### Running the Application
 
 ```bash
+# Activate virtual environment first
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
 # Web Interface (Gradio UI) - opens at http://127.0.0.1:7860
 python app.py
 
