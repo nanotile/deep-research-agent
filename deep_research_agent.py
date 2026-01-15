@@ -1,13 +1,14 @@
 """
 Deep Research Agent
 A multi-agent system for conducting in-depth web research and generating comprehensive reports.
-Works standalone without external search APIs.
+Supports real-time web search via Tavily API with LLM fallback.
 """
 
 import os
 import asyncio
-import json
-from typing import List, Dict
+import time
+from dataclasses import dataclass
+from typing import List, Dict, Optional, AsyncIterator
 from dotenv import load_dotenv
 from anthropic import AsyncAnthropic
 from pydantic import BaseModel, Field
@@ -20,8 +21,22 @@ load_dotenv()
 client = AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 resend.api_key = os.getenv("RESEND_API_KEY")
 
+# Initialize Tavily client (optional - graceful fallback if not available)
+tavily_client = None
+tavily_api_key = os.getenv("TAVILY_API_KEY")
+if tavily_api_key and tavily_api_key != "your_tavily_api_key_here":
+    try:
+        from tavily import AsyncTavilyClient
+        tavily_client = AsyncTavilyClient(api_key=tavily_api_key)
+    except ImportError:
+        print("Warning: tavily-python not installed. Using LLM knowledge fallback.")
+
 print("="*70)
 print("🔬 DEEP RESEARCH AGENT")
+if tavily_client:
+    print("📡 Tavily API: Enabled (real-time web search)")
+else:
+    print("📚 Tavily API: Disabled (using LLM knowledge)")
 print("="*70)
 
 # Pydantic models for structured outputs
@@ -33,6 +48,17 @@ class WebSearchItem(BaseModel):
 class WebSearchPlan(BaseModel):
     """Collection of web searches to perform"""
     searches: List[WebSearchItem] = Field(description="List of web searches to perform")
+
+@dataclass
+class ProgressUpdate:
+    """Progress update for UI display"""
+    stage: str           # "planning", "searching", "writing", "emailing", "complete"
+    stage_display: str   # Human-readable stage name
+    current_step: int    # Current step within stage (1-based)
+    total_steps: int     # Total steps in stage
+    elapsed_time: float  # Seconds elapsed for current stage
+    message: str         # Detailed status message
+    report: Optional[str] = None  # Final report (only set when complete)
 
 # Configuration
 HOW_MANY_SEARCHES = 3
@@ -113,43 +139,111 @@ async def plan_searches(query: str) -> List[Dict[str, str]]:
 
     return search_items
 
+async def search_with_tavily(search_term: str) -> str:
+    """
+    Execute a Tavily web search and synthesize results with Claude.
+    Returns a summary string compatible with the existing pipeline.
+    """
+    # Call Tavily API
+    response = await tavily_client.search(
+        query=search_term,
+        search_depth="basic",
+        max_results=5,
+        include_answer=False
+    )
+
+    # Format raw results for Claude synthesis
+    raw_results = []
+    for result in response.get("results", []):
+        raw_results.append(
+            f"Source: {result.get('title', 'Unknown')}\n"
+            f"URL: {result.get('url', '')}\n"
+            f"Content: {result.get('content', '')}\n"
+        )
+
+    formatted_results = "\n---\n".join(raw_results)
+
+    # Use Claude to synthesize the raw search results
+    synthesis_prompt = f"""Based on these web search results for "{search_term}",
+provide a comprehensive summary (2-3 paragraphs, max 300 words) covering:
+- Key facts and current developments
+- Important trends or patterns
+- Relevant statistics or examples
+
+Search Results:
+{formatted_results}
+
+Write only the summary, synthesizing information from all sources.
+Be specific and factual. Do not include URLs or source citations."""
+
+    response = await client.messages.create(
+        model=MODEL,
+        max_tokens=1024,
+        system="You are an expert researcher synthesizing web search results into concise summaries.",
+        messages=[{"role": "user", "content": synthesis_prompt}],
+        temperature=0.3
+    )
+
+    return response.content[0].text
+
+
+async def search_with_llm_knowledge(search_term: str) -> str:
+    """
+    Fallback: Use LLM's knowledge base for research when Tavily is unavailable.
+    """
+    research_prompt = f"""Research and provide comprehensive information about: {search_term}
+
+Provide a detailed summary (2-3 paragraphs, max 300 words) covering:
+- Key facts and current developments
+- Important trends or patterns
+- Relevant statistics or examples
+- Recent updates (if applicable)
+
+Be specific, factual, and cite approximate timeframes when relevant.
+Write only the summary, no additional commentary."""
+
+    response = await client.messages.create(
+        model=MODEL,
+        max_tokens=1024,
+        system="You are an expert researcher with deep knowledge across many domains. Your knowledge extends to early 2025.",
+        messages=[{"role": "user", "content": research_prompt}],
+        temperature=0.3
+    )
+
+    return response.content[0].text
+
+
 async def execute_searches(search_items: List[Dict[str, str]]) -> List[Dict[str, str]]:
     """
-    Search Agent: Use LLM's knowledge to research topics
+    Search Agent: Execute web searches using Tavily API, with LLM fallback
     """
-    print("\n🔍 Executing knowledge-based research...")
+    use_tavily = tavily_client is not None
+
+    if use_tavily:
+        print("\n🔍 Executing web searches via Tavily API...")
+    else:
+        print("\n🔍 Executing knowledge-based research (no Tavily API key)...")
+
     search_results = []
 
     for i, item in enumerate(search_items, 1):
-        print(f"  [{i}/{len(search_items)}] Researching: {item['search_term']}")
+        print(f"  [{i}/{len(search_items)}] Searching: {item['search_term']}")
 
-        # Use LLM's knowledge base for research
-        research_prompt = f"""Research and provide comprehensive information about: {item['search_term']}
+        if use_tavily:
+            try:
+                summary = await search_with_tavily(item['search_term'])
+            except Exception as e:
+                print(f"      ! Tavily failed ({e}), using LLM fallback")
+                summary = await search_with_llm_knowledge(item['search_term'])
+        else:
+            summary = await search_with_llm_knowledge(item['search_term'])
 
-        Provide a detailed summary (2-3 paragraphs, max 300 words) covering:
-        - Key facts and current developments
-        - Important trends or patterns
-        - Relevant statistics or examples
-        - Recent updates (if applicable)
-
-        Be specific, factual, and cite approximate timeframes when relevant.
-        Write only the summary, no additional commentary."""
-
-        response = await client.messages.create(
-            model=MODEL,
-            max_tokens=1024,
-            system="You are an expert researcher with deep knowledge across many domains. Your knowledge extends to early 2025.",
-            messages=[{"role": "user", "content": research_prompt}],
-            temperature=0.3
-        )
-
-        summary = response.content[0].text
         search_results.append({
             "search_term": item['search_term'],
             "reason": item['reason'],
             "summary": summary
         })
-        print(f"      ✓ Research complete")
+        print(f"      ✓ Search complete")
 
     return search_results
 
@@ -277,6 +371,151 @@ async def deep_research(
         )
 
     return final_report
+
+
+async def deep_research_with_progress(
+    query: str,
+    send_via_email: bool = False,
+    recipient: str = None
+) -> AsyncIterator[ProgressUpdate]:
+    """
+    Main Orchestrator with progress updates.
+    Yields ProgressUpdate objects as research progresses.
+
+    Args:
+        query: Research question or topic
+        send_via_email: Whether to email the report
+        recipient: Email address (required if send_via_email=True)
+
+    Yields:
+        ProgressUpdate objects tracking each stage
+    """
+    print(f"\n🎯 Research Query: {query}")
+    print("="*70)
+
+    # Stage 1: Planning
+    stage_start = time.time()
+    yield ProgressUpdate(
+        stage="planning",
+        stage_display="Planning Agent",
+        current_step=1,
+        total_steps=1,
+        elapsed_time=0,
+        message="Generating search queries..."
+    )
+
+    search_items = await plan_searches(query)
+
+    yield ProgressUpdate(
+        stage="planning",
+        stage_display="Planning Agent",
+        current_step=1,
+        total_steps=1,
+        elapsed_time=time.time() - stage_start,
+        message=f"Generated {len(search_items)} search queries"
+    )
+
+    # Stage 2: Searching
+    stage_start = time.time()
+    total_searches = len(search_items)
+    search_results = []
+    use_tavily = tavily_client is not None
+
+    for i, item in enumerate(search_items, 1):
+        yield ProgressUpdate(
+            stage="searching",
+            stage_display="Research Agent" + (" (Tavily)" if use_tavily else " (LLM)"),
+            current_step=i,
+            total_steps=total_searches,
+            elapsed_time=time.time() - stage_start,
+            message=f"Searching: {item['search_term']}"
+        )
+
+        # Execute single search
+        if use_tavily:
+            try:
+                summary = await search_with_tavily(item['search_term'])
+            except Exception as e:
+                print(f"      ! Tavily failed ({e}), using LLM fallback")
+                summary = await search_with_llm_knowledge(item['search_term'])
+        else:
+            summary = await search_with_llm_knowledge(item['search_term'])
+
+        search_results.append({
+            "search_term": item['search_term'],
+            "reason": item['reason'],
+            "summary": summary
+        })
+
+    yield ProgressUpdate(
+        stage="searching",
+        stage_display="Research Agent",
+        current_step=total_searches,
+        total_steps=total_searches,
+        elapsed_time=time.time() - stage_start,
+        message=f"Completed {total_searches} searches"
+    )
+
+    # Stage 3: Writing
+    stage_start = time.time()
+    yield ProgressUpdate(
+        stage="writing",
+        stage_display="Report Writing Agent",
+        current_step=1,
+        total_steps=1,
+        elapsed_time=0,
+        message="Synthesizing research into report..."
+    )
+
+    final_report = await write_report(query, search_results)
+
+    yield ProgressUpdate(
+        stage="writing",
+        stage_display="Report Writing Agent",
+        current_step=1,
+        total_steps=1,
+        elapsed_time=time.time() - stage_start,
+        message="Report generated"
+    )
+
+    # Stage 4: Email (optional)
+    if send_via_email and recipient:
+        stage_start = time.time()
+        yield ProgressUpdate(
+            stage="emailing",
+            stage_display="Email Agent",
+            current_step=1,
+            total_steps=1,
+            elapsed_time=0,
+            message=f"Sending report to {recipient}..."
+        )
+
+        await send_email_report(
+            recipient=recipient,
+            subject=f"Research Report: {query}",
+            report=final_report
+        )
+
+        yield ProgressUpdate(
+            stage="emailing",
+            stage_display="Email Agent",
+            current_step=1,
+            total_steps=1,
+            elapsed_time=time.time() - stage_start,
+            message="Email sent successfully"
+        )
+
+    # Final complete status with report
+    yield ProgressUpdate(
+        stage="complete",
+        stage_display="Complete",
+        current_step=1,
+        total_steps=1,
+        elapsed_time=0,
+        message="Research complete!",
+        report=final_report
+    )
+
 
 async def main():
     """

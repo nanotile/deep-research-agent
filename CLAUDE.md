@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Deep Research Agent is a multi-agent AI system that automates research and report generation using Anthropic's Claude API. The system uses an asynchronous architecture with four specialized agents that work in sequence: Planning, Research, Report Writing, and Email Delivery.
+Deep Research Agent is a multi-agent AI system that automates research and report generation using Anthropic's Claude API. The system supports real-time web search via Tavily API (with LLM knowledge fallback) and provides live progress tracking in the web UI. Four specialized agents work in sequence: Planning, Research, Report Writing, and Email Delivery.
 
 ## Core Commands
 
@@ -45,9 +45,15 @@ User Query → plan_searches() → execute_searches() → write_report() → [se
 ```
 
 1. **Planning Agent** (`plan_searches`): Uses tool calling with `SEARCH_PLAN_TOOL` to generate structured search queries
-2. **Research Agent** (`execute_searches`): Uses LLM knowledge to research each topic (no external search API)
+2. **Research Agent** (`execute_searches`): Searches via Tavily API (real-time web) or falls back to LLM knowledge
 3. **Report Agent** (`write_report`): Synthesizes findings into structured markdown report
 4. **Email Agent** (`send_email_report`): Converts markdown to HTML and sends via Resend API
+
+### Progress Tracking
+
+`deep_research_with_progress()` is an async generator that yields `ProgressUpdate` objects for UI streaming:
+- Tracks current stage, step progress (1/3, 2/3, 3/3), and elapsed time
+- Used by `app.py` via background thread + queue pattern for Gradio compatibility
 
 ### Key Configuration
 
@@ -64,13 +70,17 @@ Uses Pydantic models with Anthropic tool calling for type-safe planning output:
 
 ### Web Interface (`app.py`)
 
-- Gradio Blocks UI wrapping `deep_research()` with `asyncio.run()` sync bridge
+- Gradio Blocks UI with live progress indicators (agent name, step progress, elapsed time)
+- Uses generator pattern with background thread for async-to-sync bridge
 - Binds to `0.0.0.0:7860` for external access
 
 ## API Dependencies
 
 - **Required**: `ANTHROPIC_API_KEY` - all LLM operations
+- **Optional**: `TAVILY_API_KEY` - real-time web search (falls back to LLM knowledge if not set)
 - **Optional**: `RESEND_API_KEY` - email delivery only
+
+Get Tavily API key (free tier available): https://tavily.com
 
 ## VM Networking Utilities (GCP)
 
