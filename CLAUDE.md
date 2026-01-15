@@ -8,8 +8,6 @@ Deep Research Agent is a multi-agent AI system that automates research and repor
 
 ## Core Commands
 
-### Running the Application
-
 ```bash
 # Activate virtual environment first
 source venv/bin/activate  # On Windows: venv\Scripts\activate
@@ -28,99 +26,77 @@ python test_email.py
 
 ```bash
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+source venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
 # Edit .env with your ANTHROPIC_API_KEY and RESEND_API_KEY
 ```
 
-## Multi-Agent Architecture
+## Architecture
 
-All agents are defined in `deep_research_agent.py` and execute sequentially:
+### Agent Pipeline (`deep_research_agent.py`)
 
-| Agent | Function | Input | Output |
-|-------|----------|-------|--------|
-| **Planning** | `plan_searches()` | User query | List of `WebSearchItem` (reason + search_term) |
-| **Research** | `execute_searches()` | Search items | List of dicts with summaries |
-| **Report Writing** | `write_report()` | Query + results | Markdown report |
-| **Email** | `send_email_report()` | Report + recipient | Email via Resend API |
+All agents execute sequentially via the `deep_research()` orchestrator:
 
-### Main Orchestrator
-
-```python
-async def deep_research(
-    query: str,
-    send_via_email: bool = False,
-    recipient: str = None
-) -> str:  # Returns markdown report
+```
+User Query → plan_searches() → execute_searches() → write_report() → [send_email_report()]
+                  ↓                    ↓                   ↓                    ↓
+           WebSearchPlan        List[summaries]      Markdown report    Email via Resend
 ```
 
-### Key Configuration (in `deep_research_agent.py`)
+1. **Planning Agent** (`plan_searches`): Uses tool calling with `SEARCH_PLAN_TOOL` to generate structured search queries
+2. **Research Agent** (`execute_searches`): Uses LLM knowledge to research each topic (no external search API)
+3. **Report Agent** (`write_report`): Synthesizes findings into structured markdown report
+4. **Email Agent** (`send_email_report`): Converts markdown to HTML and sends via Resend API
 
-- `HOW_MANY_SEARCHES = 3` - Number of search queries to generate
-- `MODEL = "claude-sonnet-4-20250514"` - Anthropic model (can change to `"claude-opus-4-20250514"`)
+### Key Configuration
 
-### Pydantic Models for Structured Output
+```python
+HOW_MANY_SEARCHES = 3  # Number of search queries to generate
+MODEL = "claude-sonnet-4-20250514"  # or "claude-opus-4-20250514" for better quality
+```
 
-- `WebSearchItem`: Single search with `reason` and `search_term` fields
-- `WebSearchPlan`: Container with list of `WebSearchItem` objects
+### Structured Output
 
-## Gradio Web Interface (`app.py`)
+Uses Pydantic models with Anthropic tool calling for type-safe planning output:
+- `WebSearchItem`: `{reason: str, search_term: str}`
+- `WebSearchPlan`: `{searches: List[WebSearchItem]}`
 
-- Wraps `deep_research()` with sync/async bridge via `asyncio.run()`
-- Input: query text, email checkbox, recipient email
-- Output: Rendered markdown report
-- Port 7860, binds to 0.0.0.0 for external access
+### Web Interface (`app.py`)
+
+- Gradio Blocks UI wrapping `deep_research()` with `asyncio.run()` sync bridge
+- Binds to `0.0.0.0:7860` for external access
 
 ## API Dependencies
 
-- **Required**: Anthropic API key (all LLM operations)
-- **Optional**: Resend API key (email delivery only)
-
-## Cost Considerations
-
-- ~$0.05-$0.15 per research run
-- 5,000-15,000 tokens per query
-- Monitor at https://console.anthropic.com/
+- **Required**: `ANTHROPIC_API_KEY` - all LLM operations
+- **Optional**: `RESEND_API_KEY` - email delivery only
 
 ## VM Networking Utilities (GCP)
 
-Standalone utilities for Google Cloud VMs with non-static IPs. These are **project-agnostic** and can be copied to any project.
-
-### Key Utilities
+Standalone utilities for Google Cloud VMs with non-static IPs. Project-agnostic.
 
 | File | Purpose |
 |------|---------|
-| `vm_ip_utils.py` | Dynamic IP management: `get_vm_ip()`, `get_server_url(port)`, `configure_gradio_server(port)` |
-| `vm_firewall_utils.py` | Port diagnostics: `diagnose_port(port)`, `check_port_listening(port)` |
-| `check_firewall.py` | Complete GCP firewall analysis (requires gcloud CLI) |
+| `vm_ip_utils.py` | `get_vm_ip()`, `get_server_url(port)`, `configure_gradio_server(port)` |
+| `vm_firewall_utils.py` | `diagnose_port(port)`, `check_port_listening(port)` |
+| `check_firewall.py` | Full GCP firewall analysis (requires gcloud CLI) |
 
 ### Quick Diagnostics
 
 ```bash
 python check_firewall.py              # Full firewall analysis
 python vm_firewall_utils.py 3000      # Check specific port
-python -c "from vm_ip_utils import get_vm_ip; print(get_vm_ip())"
 ```
 
-### External Access Pattern
+### External Access
 
-Always bind to `0.0.0.0` (not `127.0.0.1`) for external access:
+Always bind to `0.0.0.0` (not `127.0.0.1`):
 
 ```python
-# Gradio
-from vm_ip_utils import configure_gradio_server, print_access_info
-print_access_info(port=7860, service_name="My App")
 demo.launch(**configure_gradio_server(port=7860))
-
-# Flask/FastAPI
-app.run(host="0.0.0.0", port=5000)
 ```
 
-### Allowed Ports
+**Allowed Ports**: 22, 3000, 5000, 7859-7862, 8000, 8080, 8888, 8889
 
-22 (SSH), 3000, 5000, 7859-7862, 8000, 8080, 8888, 8889
-
-### Common Issue
-
-"ERR_CONNECTION_REFUSED" usually means nothing is listening or service is bound to 127.0.0.1 instead of 0.0.0.0. Run `python vm_firewall_utils.py <port>` for diagnosis.
+**Common Issue**: "ERR_CONNECTION_REFUSED" = nothing listening or bound to 127.0.0.1. Run `python vm_firewall_utils.py <port>` to diagnose.
