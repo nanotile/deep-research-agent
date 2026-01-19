@@ -133,10 +133,10 @@ def run_research_with_progress(query: str, send_email: bool, recipient: str = ""
 
 
 # Create the Gradio interface
-with gr.Blocks(theme=gr.themes.Soft(), title="Deep Research Agent") as demo:
+search_mode = "Tavily web search" if tavily_client else "LLM knowledge base"
+with gr.Blocks(title="Deep Research Agent") as demo:
 
     # Header
-    search_mode = "Tavily web search" if tavily_client else "LLM knowledge base"
     gr.Markdown(f"""
     # 🔬 Deep Research Agent
     ### Multi-Agent System for Comprehensive Research Reports
@@ -145,7 +145,6 @@ with gr.Blocks(theme=gr.themes.Soft(), title="Deep Research Agent") as demo:
     1. **Plan** relevant search queries
     2. **Research** each topic via {search_mode}
     3. **Synthesize** findings into a professional report
-    4. **Email** the report (optional)
     """)
 
     with gr.Row():
@@ -182,7 +181,7 @@ with gr.Blocks(theme=gr.themes.Soft(), title="Deep Research Agent") as demo:
 
     # Output area
     output = gr.Markdown(
-        label="📊 Research Report",
+        label="Research Report",
         value="*Your research report will appear here...*"
     )
 
@@ -229,11 +228,12 @@ with gr.Blocks(theme=gr.themes.Soft(), title="Deep Research Agent") as demo:
 # Launch the app
 if __name__ == "__main__":
     print("\n" + "="*70)
-    print("🌐 Starting Gradio Web Interface...")
+    print("Starting Gradio Web Interface...")
     print("="*70)
     demo.launch(
         server_name="0.0.0.0",
         server_port=7860,
         share=False,
-        show_error=True
+        show_error=False,
+        theme=gr.themes.Soft()
     )
