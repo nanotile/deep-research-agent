@@ -54,7 +54,7 @@ def format_progress_display(update: ProgressUpdate, total_elapsed: float) -> str
     return "\n".join(lines)
 
 
-def run_research_with_progress(query: str, send_email: bool, recipient: str = ""):
+def run_research_with_progress(query: str):
     """
     Generator function that yields progress updates and final report.
     Uses a background thread to run async code while yielding updates.
@@ -64,10 +64,6 @@ def run_research_with_progress(query: str, send_email: bool, recipient: str = ""
         yield "### ⚠️ Input Required\n\nPlease enter a research query!", "*Your research report will appear here...*"
         return
 
-    if send_email and (not recipient or recipient.strip() == ""):
-        yield "### ⚠️ Input Required\n\nPlease provide a recipient email address!", "*Your research report will appear here...*"
-        return
-
     # Queue for communication between async task and generator
     progress_queue = Queue()
 
@@ -75,9 +71,7 @@ def run_research_with_progress(query: str, send_email: bool, recipient: str = ""
         """Run the async research in a separate thread"""
         async def async_wrapper():
             async for update in deep_research_with_progress(
-                query=query.strip(),
-                send_via_email=send_email,
-                recipient=recipient.strip() if send_email else None
+                query=query.strip()
             ):
                 progress_queue.put(update)
 
@@ -156,17 +150,6 @@ with gr.Blocks(title="Deep Research Agent") as demo:
                 lines=2
             )
 
-            with gr.Row():
-                email_checkbox = gr.Checkbox(
-                    label="📧 Send via Email",
-                    value=False
-                )
-                recipient_input = gr.Textbox(
-                    label="Recipient Email",
-                    placeholder="your@email.com",
-                    scale=2
-                )
-
             # Buttons
             with gr.Row():
                 submit_btn = gr.Button("🚀 Start Research", variant="primary", scale=2)
@@ -188,13 +171,13 @@ with gr.Blocks(title="Deep Research Agent") as demo:
     # Button actions - use generator for streaming updates
     submit_btn.click(
         fn=run_research_with_progress,
-        inputs=[query_input, email_checkbox, recipient_input],
+        inputs=[query_input],
         outputs=[status_display, output]
     )
 
     clear_btn.click(
-        lambda: ("", False, "", "### ⏳ Ready\n\nEnter a query and click **Start Research**", "*Your research report will appear here...*"),
-        outputs=[query_input, email_checkbox, recipient_input, status_display, output]
+        lambda: ("", "### ⏳ Ready\n\nEnter a query and click **Start Research**", "*Your research report will appear here...*"),
+        outputs=[query_input, status_display, output]
     )
 
     # Instructions in collapsible section
@@ -205,12 +188,10 @@ with gr.Blocks(title="Deep Research Agent") as demo:
         2. Click "Start Research"
         3. Watch the progress indicators
         4. Wait for the report (typically 1-2 minutes)
-        5. Optionally send via email
 
         ### Requirements
         - **Anthropic API key** in `.env` (required)
         - **Tavily API key** in `.env` (optional - enables real-time web search)
-        - **Resend API key** in `.env` (optional - for email delivery)
 
         ### Example Queries
         - "AI trends in 2026"
