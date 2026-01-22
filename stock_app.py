@@ -246,12 +246,13 @@ with gr.Blocks(title="Stock Research Agent", theme=gr.themes.Soft()) as demo:
 # Launch the app
 if __name__ == "__main__":
     print("\n" + "=" * 70)
-    print("Starting Stock Research Agent Web Interface...")
+    print("📈 STOCK APP - NOT THE GENERAL APP")
+    print("This app uses stock_research_agent.py")
+    print("You should see BUY/HOLD/SELL recommendations!")
     print("=" * 70)
     demo.launch(
         server_name="0.0.0.0",
-        server_port=7861,  # Different port from main app
+        server_port=7862,
         share=False,
-        show_error=False,
-        theme=gr.themes.Soft()
+        show_error=True
     )
