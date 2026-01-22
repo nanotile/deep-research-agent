@@ -139,6 +139,8 @@ with gr.Blocks(title="Deep Research Agent", theme=gr.themes.Soft()) as demo:
     1. **Plan** relevant search queries
     2. **Research** each topic via {search_mode}
     3. **Synthesize** findings into a professional report
+
+    **Looking for stock trading analysis?** [Open Stock Research Agent (port 7862)](http://localhost:7862) - Get Buy/Hold/Sell recommendations, price targets, and financial metrics.
     """)
 
     with gr.Row():

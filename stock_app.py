@@ -147,6 +147,8 @@ with gr.Blocks(title="Stock Research Agent", theme=gr.themes.Soft()) as demo:
     - **Latest News** (with source links)
     - **SEC Filings** (10-K, 10-Q, 8-K with direct links)
     - **Insider Activity** (Recent transactions)
+
+    **Need general research?** [Open Deep Research Agent (port 7861)](http://localhost:7861) - Research any topic with comprehensive reports.
     """)
 
     with gr.Row():
