@@ -15,7 +15,7 @@ from anthropic import AsyncAnthropic
 from stock_data_models import (
     StockDataBundle, StockAnalysis, StockProgressUpdate,
     RecommendationType, ValuationAssessment, InvestmentThesis,
-    SourceURL,
+    SourceURL, MacroRiskAssessment, RiskLevel,
 )
 from stock_data_fetchers import (
     validate_ticker,
@@ -24,6 +24,7 @@ from stock_data_fetchers import (
     fetch_sec_edgar_filings,
     fetch_alpha_vantage_data,
     fetch_tavily_news,
+    fetch_macro_sentiment,
 )
 
 # Load environment variables
@@ -116,7 +117,7 @@ async def fetch_all_stock_data(ticker: str, company_name: str) -> StockDataBundl
     """
     print(f"\n🔍 Fetching data for {ticker} ({company_name})...")
 
-    # Define all fetch tasks
+    # Define all fetch tasks (first batch - need alpha_vantage for sector)
     tasks = {
         'yfinance': fetch_yfinance_data(ticker),
         'finnhub': fetch_finnhub_data(ticker),
@@ -145,6 +146,31 @@ async def fetch_all_stock_data(ticker: str, company_name: str) -> StockDataBundl
         else:
             setattr(bundle, source_name, result)
             print(f"  ✅ {source_name}: Success")
+
+    # Fetch macro sentiment (get sector from yfinance or alpha_vantage)
+    sector = None
+    if bundle.yfinance and bundle.yfinance.fetch_success:
+        # yfinance stores sector in the raw info, but we need to fetch it
+        import yfinance as yf
+        try:
+            stock = yf.Ticker(ticker)
+            sector = stock.info.get('sector')
+        except Exception:
+            pass
+    if not sector and bundle.alpha_vantage and bundle.alpha_vantage.overview:
+        sector = bundle.alpha_vantage.overview.sector
+
+    try:
+        macro_result = await fetch_macro_sentiment(ticker, sector=sector)
+        if macro_result.fetch_success:
+            bundle.macro_sentiment = macro_result
+            print(f"  ✅ macro_sentiment: Success (VIX: {macro_result.vix_current})")
+        else:
+            errors.append(f"macro_sentiment: {macro_result.error_message}")
+            print(f"  ⚠️ macro_sentiment: {macro_result.error_message}")
+    except Exception as e:
+        errors.append(f"macro_sentiment: {str(e)}")
+        print(f"  ❌ macro_sentiment: Error - {str(e)[:50]}")
 
     bundle.fetch_errors = errors
     print(f"\n📊 Data collected from {len(bundle.get_successful_sources())} sources")
@@ -178,8 +204,9 @@ Consider:
 - Recent news and SEC filings
 - Technical indicators if available
 - Risk factors and potential catalysts
+- MACRO/POLITICAL RISK: Pay special attention to current VIX levels, trade policy news (tariffs, trade wars), Federal Reserve policy, and government economic announcements. Factor in the stock's sector sensitivity to political risk.
 
-Provide a balanced, objective analysis."""
+Provide a balanced, objective analysis. Include any relevant macro/political risks in your key_risks assessment."""
 
     response = await client.messages.create(
         model=MODEL,
@@ -306,6 +333,39 @@ def _format_data_for_analysis(data: StockDataBundle) -> str:
             insider_text.append(f"- {txn.name} {action} {abs(txn.share_change):,} shares on {txn.transaction_date.strftime('%Y-%m-%d')}")
         sections.append("\n".join(insider_text))
 
+    # Macro/Political Risk Data
+    if data.macro_sentiment:
+        macro = data.macro_sentiment
+        macro_text = ["## Macro & Political Risk Environment"]
+
+        # VIX data
+        if macro.vix_current:
+            vix_level = "Low" if macro.vix_current < 15 else "Elevated" if macro.vix_current < 20 else "High" if macro.vix_current < 30 else "Extreme"
+            macro_text.append(f"- VIX (Volatility Index): {macro.vix_current:.2f} ({vix_level})")
+            if macro.vix_change_percent:
+                direction = "up" if macro.vix_change_percent > 0 else "down"
+                macro_text.append(f"- VIX Change: {direction} {abs(macro.vix_change_percent):.1f}% from previous close")
+
+        # Sector sensitivity
+        if macro.sector and macro.sector_political_sensitivity:
+            macro_text.append(f"- Sector: {macro.sector}")
+            macro_text.append(f"- Political/Trade Policy Sensitivity: {macro.sector_political_sensitivity.upper()}")
+
+        # Political news summary
+        if macro.political_news:
+            macro_text.append(f"\n### Recent Political/Macro News ({len(macro.political_news)} articles)")
+            # Group by category
+            by_category = {}
+            for item in macro.political_news:
+                by_category.setdefault(item.category, []).append(item)
+
+            for category, items in by_category.items():
+                macro_text.append(f"\n**{category.replace('_', ' ').title()}:**")
+                for item in items[:3]:
+                    macro_text.append(f"- {item.title}")
+
+        sections.append("\n".join(macro_text))
+
     return "\n\n".join(sections)
 
 
@@ -413,6 +473,54 @@ async def write_stock_report(
 |--------|-------|
 {chr(10).join(health_rows)}
 """)
+
+    # Macro/Political Risk Section
+    if data.macro_sentiment:
+        macro = data.macro_sentiment
+        macro_section = ["---\n\n## Macro & Political Risk"]
+
+        # VIX indicator
+        if macro.vix_current:
+            vix_level = "Low" if macro.vix_current < 15 else "Elevated" if macro.vix_current < 20 else "High" if macro.vix_current < 30 else "Extreme"
+            vix_emoji = "🟢" if macro.vix_current < 15 else "🟡" if macro.vix_current < 20 else "🟠" if macro.vix_current < 30 else "🔴"
+            change_str = ""
+            if macro.vix_change_percent:
+                change_dir = "↑" if macro.vix_change_percent > 0 else "↓"
+                change_str = f" ({change_dir} {abs(macro.vix_change_percent):.1f}%)"
+
+            macro_section.append(f"""
+### Market Volatility (VIX)
+| Indicator | Value |
+|-----------|-------|
+| VIX Level | {vix_emoji} {macro.vix_current:.2f} ({vix_level}){change_str} |
+""")
+
+        # Sector sensitivity
+        if macro.sector and macro.sector_political_sensitivity:
+            sensitivity_emoji = "🔴" if macro.sector_political_sensitivity == "high" else "🟡" if macro.sector_political_sensitivity == "medium" else "🟢"
+            macro_section.append(f"""### Sector Political Sensitivity
+| Sector | Sensitivity |
+|--------|-------------|
+| {macro.sector} | {sensitivity_emoji} {macro.sector_political_sensitivity.upper()} |
+
+*High sensitivity sectors are more exposed to tariffs, trade policy changes, and government regulation.*
+""")
+
+        # Political news highlights
+        if macro.political_news:
+            macro_section.append("### Recent Political & Trade Policy News")
+            # Group by category
+            by_category = {}
+            for item in macro.political_news:
+                by_category.setdefault(item.category, []).append(item)
+
+            for category in ['government', 'tariffs', 'trade_policy', 'fed', 'geopolitical', 'regulation']:
+                if category in by_category:
+                    macro_section.append(f"\n**{category.replace('_', ' ').title()}:**")
+                    for item in by_category[category][:2]:
+                        macro_section.append(f"- [{item.title}]({item.url})")
+
+        report_sections.append("\n".join(macro_section))
 
     # Analyst Opinions
     if data.finnhub and data.finnhub.analyst_recommendations:
@@ -637,7 +745,7 @@ async def stock_research_with_progress(ticker: str) -> AsyncIterator[StockProgre
 
     # Stage 2: Fetch data (with source-by-source updates)
     stage_start = time.time()
-    sources = ['yfinance', 'finnhub', 'sec_filings', 'alpha_vantage', 'tavily_news']
+    sources = ['yfinance', 'finnhub', 'sec_filings', 'alpha_vantage', 'tavily_news', 'macro_sentiment']
     source_status = {s: "pending" for s in sources}
 
     yield StockProgressUpdate(
@@ -663,6 +771,8 @@ async def stock_research_with_progress(ticker: str) -> AsyncIterator[StockProgre
     else: source_status['alpha_vantage'] = "failed"
     if data.tavily_news and data.tavily_news.fetch_success: source_status['tavily_news'] = "success"
     else: source_status['tavily_news'] = "failed"
+    if data.macro_sentiment and data.macro_sentiment.fetch_success: source_status['macro_sentiment'] = "success"
+    else: source_status['macro_sentiment'] = "failed"
 
     successful = sum(1 for s in source_status.values() if s == "success")
 
