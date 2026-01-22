@@ -1,64 +1,90 @@
 
 # Session Notes - Deep Research Agent
 
-## What Was Completed Today
-
-1. **MacroRiskAssessment model** added to stock_data_models.py
-   - political_risk_level, vix_level, key_political_factors, sector_exposure
-
-2. **fetch_macro_sentiment()** added to stock_data_fetchers.py
-   - Fetches VIX via yfinance
-   - Searches Tavily for political news (Trump, tariffs, Fed, trade policy, government)
-   - Maps sector sensitivity (high/medium/low)
-
-3. **stock_research_agent.py** updated
-   - Macro data included in analysis prompt
-   - Political risk section added to reports
-   - Shows VIX level, sector sensitivity, political news by category
-
-4. **All Stock Research Agent files committed and pushed**
-
 ## Current App Configuration
 
-| App | Port | Command |
+| App | Port | Purpose |
 |-----|------|---------|
-| stock_app.py | 7862 | `source venv/bin/activate && python stock_app.py` |
-| app.py | 7861 | `source venv/bin/activate && python app.py` |
-
-## Issue: VS Code Port Forwarding
-
-VS Code Remote SSH auto-forwards ports incorrectly, causing redirects and blank pages.
-
-**To fix next session:**
-1. In VS Code Settings, disable `remote.autoForwardPorts`
-2. Or manually forward ports in PORTS panel (7862 → 7862)
-3. Or use external IP directly: `curl ifconfig.me` then `http://EXTERNAL_IP:7862`
+| launcher.py | 7859 | Landing page with links to both agents |
+| app.py | 7861 | Deep Research Agent |
+| stock_app.py | 7862 | Stock Research Agent |
 
 ## To Start Next Session
 
+**Step 1: Kill any old processes**
 ```bash
-# Kill any running apps
-killall python python3
-
-# Start Stock Research Agent
-source venv/bin/activate && python stock_app.py
-
-# In new terminal - Start General Research Agent
-source venv/bin/activate && python app.py
+sudo pkill -9 -f python
 ```
 
-Access:
-- Stock Research: http://localhost:7862
-- General Research: http://localhost:7861
+**Step 2: Start all 3 apps (each in its own terminal)**
 
-## Stock Research Agent Output Includes
+Terminal 1 - Launcher:
+```bash
+cd ~/deep-research-agent && ./venv/bin/python launcher.py
+```
 
-- Buy/Hold/Sell recommendation with confidence %
-- Price target
-- Current price, P/E, P/B, valuation ratios
-- Macro & Political Risk section (VIX, sector sensitivity)
-- Political news by category (tariffs, government, Fed, trade policy)
-- Bull/Bear case
-- SEC filings with links
-- Analyst opinions
+Terminal 2 - Deep Research:
+```bash
+cd ~/deep-research-agent && ./venv/bin/python app.py
+```
 
+Terminal 3 - Stock Research:
+```bash
+cd ~/deep-research-agent && ./venv/bin/python stock_app.py
+```
+
+## Access URLs (use external IP, NOT localhost)
+
+Get your external IP first:
+```bash
+curl -s ifconfig.me
+```
+
+Then access (replace IP if changed):
+- **Launcher Hub:** http://34.69.26.110:7859
+- **Deep Research:** http://34.69.26.110:7861
+- **Stock Research:** http://34.69.26.110:7862
+
+## Important Notes
+
+1. **DO NOT use localhost** - VS Code port forwarding causes blank pages
+2. **Use external IP** - Always access via http://EXTERNAL_IP:PORT
+3. **All 3 apps must be running** - Launcher just has links, the actual apps run separately
+
+## What Each App Does
+
+### Deep Research Agent (app.py - port 7861)
+- General research on any topic
+- AI-planned search queries
+- Web search via Tavily API
+- Comprehensive markdown reports
+
+### Stock Research Agent (stock_app.py - port 7862)
+- Buy/Hold/Sell recommendations with confidence %
+- Price targets & valuation metrics
+- Macro & Political Risk analysis (VIX, sector sensitivity)
+- SEC filings with direct links
+- Analyst ratings & insider activity
+
+### Launcher (launcher.py - port 7859)
+- Landing page with links to both agents
+- Just a menu - doesn't do research itself
+
+## Troubleshooting
+
+**Port already in use:**
+```bash
+sudo fuser -k 7859/tcp  # Kill process on port 7859
+sudo fuser -k 7861/tcp  # Kill process on port 7861
+sudo fuser -k 7862/tcp  # Kill process on port 7862
+```
+
+**Check what's running:**
+```bash
+ss -tlnp | grep -E '(7859|7861|7862)'
+```
+
+**Check external IP:**
+```bash
+curl -s ifconfig.me
+```
