@@ -128,7 +128,7 @@ def run_research_with_progress(query: str):
 
 # Create the Gradio interface
 search_mode = "Tavily web search" if tavily_client else "LLM knowledge base"
-with gr.Blocks(title="Deep Research Agent") as demo:
+with gr.Blocks(title="Deep Research Agent", theme=gr.themes.Soft()) as demo:
 
     # Header
     gr.Markdown(f"""
@@ -213,8 +213,7 @@ if __name__ == "__main__":
     print("="*70)
     demo.launch(
         server_name="0.0.0.0",
-        server_port=7860,
+        server_port=7861,
         share=False,
-        show_error=False,
-        theme=gr.themes.Soft()
+        show_error=False
     )
