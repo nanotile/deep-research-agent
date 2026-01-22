@@ -29,7 +29,14 @@ python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
-# Edit .env with your ANTHROPIC_API_KEY and RESEND_API_KEY
+# Edit .env with your ANTHROPIC_API_KEY, TAVILY_API_KEY, and RESEND_API_KEY
+```
+
+### Docker
+
+```bash
+docker build -t deep-research-agent .
+docker run -p 7860:7860 --env-file .env deep-research-agent
 ```
 
 ## Architecture
@@ -55,12 +62,23 @@ User Query → plan_searches() → execute_searches() → write_report() → [se
 - Tracks current stage, step progress (1/3, 2/3, 3/3), and elapsed time
 - Used by `app.py` via background thread + queue pattern for Gradio compatibility
 
-### Key Configuration
+### Key Configuration (`deep_research_agent.py:63-65`)
 
 ```python
 HOW_MANY_SEARCHES = 3  # Number of search queries to generate
 MODEL = "claude-sonnet-4-20250514"  # or "claude-opus-4-20250514" for better quality
 ```
+
+### Key Functions
+
+| Function | Location | Purpose |
+|----------|----------|---------|
+| `plan_searches()` | :97 | Planning agent - generates search queries via tool calling |
+| `execute_searches()` | :216 | Research agent - runs Tavily/LLM searches |
+| `write_report()` | :250 | Report agent - synthesizes findings into markdown |
+| `send_email_report()` | :294 | Email agent - converts to HTML and sends via Resend |
+| `deep_research()` | :337 | Main orchestrator - coordinates all agents |
+| `deep_research_with_progress()` | :376 | Async generator variant for UI streaming |
 
 ### Structured Output
 
@@ -110,3 +128,20 @@ demo.launch(**configure_gradio_server(port=7860))
 **Allowed Ports**: 22, 3000, 5000, 7859-7862, 8000, 8080, 8888, 8889
 
 **Common Issue**: "ERR_CONNECTION_REFUSED" = nothing listening or bound to 127.0.0.1. Run `python vm_firewall_utils.py <port>` to diagnose.
+
+## Python API
+
+```python
+from deep_research_agent import deep_research, deep_research_with_progress
+import asyncio
+
+# Simple usage
+report = asyncio.run(deep_research("Your research query"))
+
+# With progress tracking (for custom UIs)
+async def research_with_updates():
+    async for update in deep_research_with_progress("Your query"):
+        print(f"{update.stage}: {update.message}")
+        if update.report:
+            return update.report
+```
