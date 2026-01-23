@@ -5,9 +5,9 @@
 
 | App | Port | Purpose |
 |-----|------|---------|
-| launcher.py | 7859 | Landing page with links to both agents |
-| app.py | 7861 | Deep Research Agent |
-| stock_app.py | 7862 | Stock Research Agent |
+| **unified_app.py** | **7860** | **Research Agent Hub (both agents in tabs)** |
+| app.py | 7861 | Deep Research Agent (standalone fallback) |
+| stock_app.py | 7862 | Stock Research Agent (standalone fallback) |
 
 ## To Start Next Session
 
@@ -16,24 +16,14 @@
 sudo pkill -9 -f python
 ```
 
-**Step 2: Start all 3 apps (each in its own terminal)**
-
-Terminal 1 - Launcher:
+**Step 2: Start the unified app (single terminal)**
 ```bash
-cd ~/deep-research-agent && ./venv/bin/python launcher.py
+cd ~/deep-research-agent && ./venv/bin/python unified_app.py
 ```
 
-Terminal 2 - Deep Research:
-```bash
-cd ~/deep-research-agent && ./venv/bin/python app.py
-```
+That's it! One command, one app, both research agents.
 
-Terminal 3 - Stock Research:
-```bash
-cd ~/deep-research-agent && ./venv/bin/python stock_app.py
-```
-
-## Access URLs (use external IP, NOT localhost)
+## Access URL (use external IP, NOT localhost)
 
 Get your external IP first:
 ```bash
@@ -41,50 +31,56 @@ curl -s ifconfig.me
 ```
 
 Then access (replace IP if changed):
-- **Launcher Hub:** http://34.69.26.110:7859
-- **Deep Research:** http://34.69.26.110:7861
-- **Stock Research:** http://34.69.26.110:7862
+- **Research Agent Hub:** http://34.69.26.110:7860
 
 ## Important Notes
 
 1. **DO NOT use localhost** - VS Code port forwarding causes blank pages
 2. **Use external IP** - Always access via http://EXTERNAL_IP:PORT
-3. **All 3 apps must be running** - Launcher just has links, the actual apps run separately
+3. **Single app** - The unified app has tabs for both agents
 
-## What Each App Does
+## What the Unified App Contains
 
-### Deep Research Agent (app.py - port 7861)
+### Tab 1: Deep Research
 - General research on any topic
 - AI-planned search queries
 - Web search via Tavily API
 - Comprehensive markdown reports
 
-### Stock Research Agent (stock_app.py - port 7862)
+### Tab 2: Stock Research
 - Buy/Hold/Sell recommendations with confidence %
 - Price targets & valuation metrics
 - Macro & Political Risk analysis (VIX, sector sensitivity)
 - SEC filings with direct links
 - Analyst ratings & insider activity
 
-### Launcher (launcher.py - port 7859)
-- Landing page with links to both agents
-- Just a menu - doesn't do research itself
-
 ## Troubleshooting
 
 **Port already in use:**
 ```bash
-sudo fuser -k 7859/tcp  # Kill process on port 7859
-sudo fuser -k 7861/tcp  # Kill process on port 7861
-sudo fuser -k 7862/tcp  # Kill process on port 7862
+sudo fuser -k 7860/tcp  # Kill process on port 7860
 ```
 
 **Check what's running:**
 ```bash
-ss -tlnp | grep -E '(7859|7861|7862)'
+ss -tlnp | grep 7860
 ```
 
 **Check external IP:**
 ```bash
 curl -s ifconfig.me
+```
+
+## Standalone Apps (Fallback)
+
+If you need to run the apps separately for any reason:
+
+```bash
+# Deep Research only
+cd ~/deep-research-agent && ./venv/bin/python app.py
+# Access at http://EXTERNAL_IP:7861
+
+# Stock Research only
+cd ~/deep-research-agent && ./venv/bin/python stock_app.py
+# Access at http://EXTERNAL_IP:7862
 ```
