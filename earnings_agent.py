@@ -72,6 +72,31 @@ class EarningsProgressUpdate:
     tickers_processed: int = 0
     total_tickers: int = 0
     report: Optional[str] = None
+    # Token tracking
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    estimated_cost: float = 0.0
+
+
+class TokenAccumulator:
+    """Accumulates token usage across multiple API calls."""
+    def __init__(self):
+        self.input_tokens = 0
+        self.output_tokens = 0
+
+    def add(self, response):
+        if hasattr(response, 'usage'):
+            self.input_tokens += getattr(response.usage, 'input_tokens', 0)
+            self.output_tokens += getattr(response.usage, 'output_tokens', 0)
+
+    @property
+    def total_tokens(self):
+        return self.input_tokens + self.output_tokens
+
+    @property
+    def estimated_cost(self):
+        return (self.input_tokens / 1_000_000) * 3.0 + (self.output_tokens / 1_000_000) * 15.0
 
 
 def get_earnings_data(ticker: str) -> EarningsData:
@@ -312,8 +337,9 @@ async def earnings_calendar_with_progress(
         total_tickers=total
     )
 
-    # Generate analysis report using Claude
-    report = await generate_earnings_report(earnings_data)
+    # Generate analysis report using Claude with token tracking
+    tokens = TokenAccumulator()
+    report = await generate_earnings_report(earnings_data, tokens)
 
     yield EarningsProgressUpdate(
         stage="complete",
@@ -321,11 +347,15 @@ async def earnings_calendar_with_progress(
         message="Earnings analysis complete!",
         tickers_processed=total,
         total_tickers=total,
-        report=report
+        report=report,
+        input_tokens=tokens.input_tokens,
+        output_tokens=tokens.output_tokens,
+        total_tokens=tokens.total_tokens,
+        estimated_cost=tokens.estimated_cost,
     )
 
 
-async def generate_earnings_report(earnings_data: List[EarningsData]) -> str:
+async def generate_earnings_report(earnings_data: List[EarningsData], tokens: TokenAccumulator = None) -> str:
     """Generate comprehensive earnings report using Claude."""
 
     # Build data summary for Claude
@@ -417,6 +447,10 @@ Format the report in clean markdown with clear sections. Focus on actionable ins
         max_tokens=4000,
         messages=[{"role": "user", "content": prompt}]
     )
+
+    # Track tokens
+    if tokens:
+        tokens.add(response)
 
     report = response.content[0].text
 

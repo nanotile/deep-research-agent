@@ -702,6 +702,9 @@ def run_sector_research(sector: str, request: gr.Request = None):
 
             if update.stage == "complete":
                 status = f"### ✅ Complete!\n\n**Total time:** {total_elapsed:.1f}s\n\n**Companies analyzed:** {update.companies_fetched}"
+                if update.total_tokens > 0:
+                    status += f"\n\n📊 **Token Usage:** {update.total_tokens:,} tokens (${update.estimated_cost:.4f})"
+                    status += f"\n   - Input: {update.input_tokens:,} | Output: {update.output_tokens:,}"
                 yield status, update.report
                 break
             elif update.stage == "error":
@@ -788,6 +791,9 @@ def run_competitor_analysis(ticker: str, request: gr.Request = None):
 
             if update.stage == "complete":
                 status = f"### ✅ Complete!\n\n**Total time:** {total_elapsed:.1f}s"
+                if update.total_tokens > 0:
+                    status += f"\n\n📊 **Token Usage:** {update.total_tokens:,} tokens (${update.estimated_cost:.4f})"
+                    status += f"\n   - Input: {update.input_tokens:,} | Output: {update.output_tokens:,}"
                 yield status, update.report
                 break
             elif update.stage == "error":
@@ -866,6 +872,9 @@ def run_portfolio_analysis(portfolio_text: str, request: gr.Request = None):
 
             if update.stage == "complete":
                 status = f"### ✅ Complete!\n\n**Total time:** {total_elapsed:.1f}s\n\n**Holdings analyzed:** {update.holdings_processed}"
+                if update.total_tokens > 0:
+                    status += f"\n\n📊 **Token Usage:** {update.total_tokens:,} tokens (${update.estimated_cost:.4f})"
+                    status += f"\n   - Input: {update.input_tokens:,} | Output: {update.output_tokens:,}"
                 yield status, update.report
                 break
             elif update.stage == "error":
@@ -951,6 +960,9 @@ def run_portfolio_csv_analysis(file, request: gr.Request = None):
 
             if update.stage == "complete":
                 status = f"### ✅ Complete!\n\n**Total time:** {total_elapsed:.1f}s\n\n**Holdings analyzed:** {update.holdings_processed}"
+                if update.total_tokens > 0:
+                    status += f"\n\n📊 **Token Usage:** {update.total_tokens:,} tokens (${update.estimated_cost:.4f})"
+                    status += f"\n   - Input: {update.input_tokens:,} | Output: {update.output_tokens:,}"
                 yield status, update.report
                 break
             elif update.stage == "error":
@@ -1039,6 +1051,9 @@ def run_earnings_analysis(tickers_input: str, include_sentiment: bool, request: 
 
             if update.stage == "complete":
                 status = f"### ✅ Complete!\n\n**Total time:** {total_elapsed:.1f}s\n\n**Tickers analyzed:** {update.tickers_processed}"
+                if update.total_tokens > 0:
+                    status += f"\n\n📊 **Token Usage:** {update.total_tokens:,} tokens (${update.estimated_cost:.4f})"
+                    status += f"\n   - Input: {update.input_tokens:,} | Output: {update.output_tokens:,}"
                 # Save to cache
                 db_cache.save_report(
                     report_type='earnings',

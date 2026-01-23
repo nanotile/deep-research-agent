@@ -102,6 +102,31 @@ class SectorProgressUpdate:
     companies_fetched: int = 0
     total_companies: int = 0
     report: Optional[str] = None
+    # Token tracking
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    estimated_cost: float = 0.0
+
+
+class TokenAccumulator:
+    """Accumulates token usage across multiple API calls."""
+    def __init__(self):
+        self.input_tokens = 0
+        self.output_tokens = 0
+
+    def add(self, response):
+        if hasattr(response, 'usage'):
+            self.input_tokens += getattr(response.usage, 'input_tokens', 0)
+            self.output_tokens += getattr(response.usage, 'output_tokens', 0)
+
+    @property
+    def total_tokens(self):
+        return self.input_tokens + self.output_tokens
+
+    @property
+    def estimated_cost(self):
+        return (self.input_tokens / 1_000_000) * 3.0 + (self.output_tokens / 1_000_000) * 15.0
 
 
 # =============================================================================
@@ -309,7 +334,7 @@ def _format_sector_data_for_analysis(sector_data: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-async def generate_sector_report(sector_data: Dict[str, Any]) -> str:
+async def generate_sector_report(sector_data: Dict[str, Any], tokens: TokenAccumulator = None) -> str:
     """
     Use Claude to generate a comprehensive sector analysis report.
     """
@@ -347,6 +372,10 @@ Please provide a thorough analysis covering all major aspects of this sector."""
         system=system_prompt,
         messages=[{"role": "user", "content": user_prompt}]
     )
+
+    # Track tokens
+    if tokens:
+        tokens.add(response)
 
     return response.content[0].text
 
@@ -487,8 +516,9 @@ async def sector_research_with_progress(sector: str) -> AsyncIterator[SectorProg
         total_companies=len(tickers),
     )
 
-    # Generate report
-    report = await generate_sector_report(sector_data)
+    # Generate report with token tracking
+    tokens = TokenAccumulator()
+    report = await generate_sector_report(sector_data, tokens)
 
     yield SectorProgressUpdate(
         stage="writing",
@@ -512,6 +542,10 @@ async def sector_research_with_progress(sector: str) -> AsyncIterator[SectorProg
         companies_fetched=len(company_data),
         total_companies=len(tickers),
         report=report,
+        input_tokens=tokens.input_tokens,
+        output_tokens=tokens.output_tokens,
+        total_tokens=tokens.total_tokens,
+        estimated_cost=tokens.estimated_cost,
     )
 
 
