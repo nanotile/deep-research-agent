@@ -366,6 +366,39 @@ class MacroRiskAssessment(BaseModel):
     sector_exposure: Dict[str, float] = Field(default_factory=dict, description="Sector exposure breakdown as percentages")
 
 
+class GeopoliticalImpact2026(BaseModel):
+    """2026-specific geopolitical and technology assessment for tech/semiconductor stocks"""
+    china_exposure: str = Field(description="China exposure level: 'high', 'medium', or 'low'")
+    surcharge_eps_impact_percent: Optional[float] = Field(
+        default=None,
+        description="Estimated EPS impact percentage from 2026 BIS surcharge"
+    )
+    technology_sovereignty_status: Optional[str] = Field(
+        default=None,
+        description="CHIPS Act benefits, domestic production status"
+    )
+    process_node_status: Optional[str] = Field(
+        default=None,
+        description="Current process node capability (2nm, 3nm, etc.)"
+    )
+    software_moat: Optional[str] = Field(
+        default=None,
+        description="Software ecosystem moat (CUDA, ROCm, cloud AI, etc.)"
+    )
+    agentic_ai_positioning: Optional[str] = Field(
+        default=None,
+        description="Company's position in the Agentic AI shift"
+    )
+    supply_chain_dependency: Optional[str] = Field(
+        default=None,
+        description="Key supply chain dependencies (TSMC, Samsung, Intel)"
+    )
+    export_control_risk: Optional[str] = Field(
+        default=None,
+        description="Assessment of export control and BIS restriction risk"
+    )
+
+
 class InvestmentThesis(BaseModel):
     """Structured investment thesis"""
     bull_case: List[str] = Field(description="3-5 bullish arguments")
@@ -383,6 +416,10 @@ class StockAnalysis(BaseModel):
     valuation_assessment: ValuationAssessment
     thesis: InvestmentThesis
     macro_risk: Optional[MacroRiskAssessment] = Field(default=None, description="Macro-level risk assessment")
+    geopolitical_2026: Optional[GeopoliticalImpact2026] = Field(
+        default=None,
+        description="2026-specific geopolitical and technology assessment for tech/semiconductor stocks"
+    )
     summary: str = Field(description="2-3 sentence executive summary")
     price_target: Optional[float] = None
     analysis_timestamp: datetime = Field(default_factory=datetime.now)

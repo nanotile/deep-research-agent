@@ -2,6 +2,11 @@
 Deep Research Agent
 A multi-agent system for conducting in-depth web research and generating comprehensive reports.
 Supports real-time web search via Tavily API with LLM fallback.
+
+Updated for 2026 market context with awareness of:
+- BIS 25% China Surcharge on high-performance compute exports
+- 2nm process node race (TSMC vs Samsung)
+- Agentic AI enterprise adoption shift
 """
 
 import os
@@ -13,6 +18,8 @@ from dotenv import load_dotenv
 from anthropic import AsyncAnthropic
 from pydantic import BaseModel, Field
 import resend
+
+from market_context_2026 import DEEP_RESEARCH_2026_CONTEXT
 
 # Load environment variables
 load_dotenv()
@@ -97,14 +104,27 @@ SEARCH_PLAN_TOOL = {
 async def plan_searches(query: str) -> List[Dict[str, str]]:
     """
     Planning Agent: Generate search queries based on the research topic
+    Updated for 2026 context awareness.
     """
     print(f"\n🤔 Planning searches for: {query}")
+
+    # Add 2026 context for tech/AI queries
+    context_hint = ""
+    if _is_tech_ai_query(query):
+        context_hint = """
+
+    IMPORTANT: When researching tech, AI, or semiconductor topics, consider including searches for:
+    - 2026 market developments and regulatory changes
+    - BIS export controls and China trade policy impacts
+    - Agentic AI enterprise adoption trends
+    - 2nm process node competition and supply chain dynamics"""
 
     prompt = f"""You are a research planning assistant. Given a research query,
     generate {HOW_MANY_SEARCHES} specific web search terms that will help comprehensively
     answer the query.
 
     Research Query: {query}
+    {context_hint}
 
     For each search, provide:
     1. A clear reason why this search is relevant
@@ -117,7 +137,7 @@ async def plan_searches(query: str) -> List[Dict[str, str]]:
     response = await client.messages.create(
         model=MODEL,
         max_tokens=1024,
-        system="You are a research planning expert. Always use the provided tool to structure your response.",
+        system="You are a research planning expert. Today's date is January 2026. Always use the provided tool to structure your response.",
         messages=[{"role": "user", "content": prompt}],
         tools=[SEARCH_PLAN_TOOL],
         tool_choice={"type": "tool", "name": "create_search_plan"}
@@ -187,11 +207,32 @@ Be specific and factual. Do not include URLs or source citations."""
     return response.content[0].text
 
 
+def _is_tech_ai_query(query: str) -> bool:
+    """Check if a query relates to tech, AI, or semiconductors."""
+    tech_keywords = [
+        "ai", "artificial intelligence", "semiconductor", "chip", "gpu", "nvidia",
+        "amd", "intel", "tsmc", "samsung", "tech", "technology", "software",
+        "cloud", "data center", "machine learning", "llm", "transformer",
+        "agentic", "agent", "compute", "processor", "memory", "hbm"
+    ]
+    query_lower = query.lower()
+    return any(keyword in query_lower for keyword in tech_keywords)
+
+
 async def search_with_llm_knowledge(search_term: str) -> str:
     """
     Fallback: Use LLM's knowledge base for research when Tavily is unavailable.
+    Updated for January 2026 knowledge context.
     """
-    research_prompt = f"""Research and provide comprehensive information about: {search_term}
+    # Add 2026 context for tech/AI queries
+    context_injection = ""
+    if _is_tech_ai_query(search_term):
+        context_injection = f"""
+{DEEP_RESEARCH_2026_CONTEXT}
+
+"""
+
+    research_prompt = f"""{context_injection}Research and provide comprehensive information about: {search_term}
 
 Provide a detailed summary (2-3 paragraphs, max 300 words) covering:
 - Key facts and current developments
@@ -205,7 +246,7 @@ Write only the summary, no additional commentary."""
     response = await client.messages.create(
         model=MODEL,
         max_tokens=1024,
-        system="You are an expert researcher with deep knowledge across many domains. Your knowledge extends to early 2025.",
+        system="You are an expert researcher with deep knowledge across many domains. Your knowledge extends to January 2026. When discussing tech, AI, or semiconductors, consider the 2026 market context including BIS export controls, 2nm process node competition, and Agentic AI adoption trends.",
         messages=[{"role": "user", "content": research_prompt}],
         temperature=0.3
     )
@@ -250,6 +291,7 @@ async def execute_searches(search_items: List[Dict[str, str]]) -> List[Dict[str,
 async def write_report(query: str, search_results: List[Dict[str, str]]) -> str:
     """
     Report Writing Agent: Synthesize findings into comprehensive report
+    Updated for 2026 context awareness.
     """
     print("\n📝 Writing comprehensive report...")
 
@@ -262,10 +304,20 @@ async def write_report(query: str, search_results: List[Dict[str, str]]) -> str:
             f"Findings:\n{result['summary']}\n"
         )
 
+    # Add 2026 context for tech/AI queries
+    context_section = ""
+    if _is_tech_ai_query(query):
+        context_section = f"""
+    IMPORTANT 2026 CONTEXT:
+    {DEEP_RESEARCH_2026_CONTEXT}
+
+    When writing about tech, AI, or semiconductors, incorporate this 2026 context where relevant.
+    """
+
     report_prompt = f"""Synthesize the following research findings into a comprehensive, well-structured report.
 
     Research Query: {query}
-
+    {context_section}
     Research Findings:
     {"="*60}
     {chr(10).join(formatted_summaries)}
@@ -282,7 +334,7 @@ async def write_report(query: str, search_results: List[Dict[str, str]]) -> str:
     response = await client.messages.create(
         model=MODEL,
         max_tokens=4096,
-        system="You are an expert research report writer.",
+        system="You are an expert research report writer. Today's date is January 2026.",
         messages=[{"role": "user", "content": report_prompt}],
         temperature=0.5
     )

@@ -18,6 +18,12 @@ from stock_data_models import (
     TavilyNewsData, TavilyArticle,
     MacroSentimentData, PoliticalNewsItem,
 )
+from market_context_2026 import (
+    is_tech_semiconductor_sector,
+    get_2026_search_queries,
+    filter_searches_for_2026,
+    GLOBAL_MARKET_CONTEXT_2026,
+)
 
 
 # =============================================================================
@@ -659,20 +665,29 @@ async def fetch_tavily_news(ticker: str, company_name: str) -> TavilyNewsData:
 # =============================================================================
 
 # Sector sensitivity to political/trade policy risk
+# Updated for 2026 context with AI and semiconductor focus
 SECTOR_POLITICAL_SENSITIVITY = {
     # High sensitivity - directly impacted by tariffs, trade policy, regulation
+    # 2026 Update: AI Infrastructure and Data Center added due to BIS export controls
     "Technology": "high",
     "Semiconductors": "high",
+    "AI Infrastructure": "high",
+    "Data Center Equipment": "high",
+    "High-End Networking": "high",
     "Consumer Cyclical": "high",
     "Industrials": "high",
     "Basic Materials": "high",
     "Energy": "high",
     "Automotive": "high",
+    "Electronic Components": "high",
+    "Communication Equipment": "high",
     # Medium sensitivity - some exposure to macro factors
     "Financial Services": "medium",
     "Communication Services": "medium",
     "Consumer Defensive": "medium",
     "Real Estate": "medium",
+    "Software - Infrastructure": "medium",
+    "Software - Application": "medium",
     # Low sensitivity - more domestic/defensive
     "Healthcare": "low",
     "Utilities": "low",
@@ -742,6 +757,19 @@ async def fetch_macro_sentiment(ticker: str, sector: Optional[str] = None) -> Ma
                 ("Treasury Secretary statement markets", "government"),
                 ("executive order economy stocks", "regulation"),
             ]
+
+            # 2026 FILTER: Add tech/semiconductor specific queries
+            if is_tech_semiconductor_sector(sector):
+                macro_queries.extend([
+                    (f"{ticker} China revenue BIS surcharge 2026", "china_surcharge"),
+                    (f"{ticker} export controls high-performance compute", "china_surcharge"),
+                    (f"{ticker} 2nm process node competitive position", "tech_war"),
+                    (f"{ticker} TSMC Samsung supply dependency", "tech_war"),
+                    (f"{ticker} agentic AI enterprise revenue 2026", "agentic_ai"),
+                    ("BIS export restrictions semiconductor 2026", "china_surcharge"),
+                    ("2nm chip production TSMC Samsung 2026", "tech_war"),
+                    ("Big Tech AI capex spending ROI 2026", "agentic_ai"),
+                ])
 
             for query, category in macro_queries:
                 search_queries.append(query)

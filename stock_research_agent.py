@@ -15,7 +15,7 @@ from anthropic import AsyncAnthropic
 from stock_data_models import (
     StockDataBundle, StockAnalysis, StockProgressUpdate,
     RecommendationType, ValuationAssessment, InvestmentThesis,
-    SourceURL, MacroRiskAssessment, RiskLevel,
+    SourceURL, MacroRiskAssessment, RiskLevel, GeopoliticalImpact2026,
 )
 from stock_data_fetchers import (
     validate_ticker,
@@ -25,6 +25,16 @@ from stock_data_fetchers import (
     fetch_alpha_vantage_data,
     fetch_tavily_news,
     fetch_macro_sentiment,
+)
+from market_context_2026 import (
+    is_tech_semiconductor_sector,
+    get_china_exposure_level,
+    estimate_surcharge_eps_impact,
+    get_process_node_status,
+    get_software_moat,
+    get_2026_analysis_prompt_injection,
+    CORE_2026_VARIABLES,
+    GLOBAL_MARKET_CONTEXT_2026,
 )
 
 # Load environment variables
@@ -98,6 +108,36 @@ STOCK_ANALYSIS_TOOL = {
             "price_target": {
                 "type": "number",
                 "description": "Price target if determinable"
+            },
+            # 2026 Strategic Outlook fields (for tech/semiconductor)
+            "china_exposure": {
+                "type": "string",
+                "enum": ["high", "medium", "low"],
+                "description": "China revenue/supply chain exposure level (for tech/semiconductor)"
+            },
+            "surcharge_eps_impact": {
+                "type": "number",
+                "description": "Estimated EPS impact percentage from 2026 BIS surcharge"
+            },
+            "agentic_ai_positioning": {
+                "type": "string",
+                "description": "Company's positioning for Agentic AI revenue opportunities"
+            },
+            "process_node_status": {
+                "type": "string",
+                "description": "Process node technology status (2nm, 3nm, etc.)"
+            },
+            "software_moat": {
+                "type": "string",
+                "description": "Software/ecosystem competitive moat"
+            },
+            "supply_chain_dependency": {
+                "type": "string",
+                "description": "Key supply chain dependencies (TSMC, Samsung, etc.)"
+            },
+            "technology_sovereignty": {
+                "type": "string",
+                "description": "CHIPS Act benefits and domestic production status"
             }
         },
         "required": ["recommendation", "confidence", "valuation_assessment",
@@ -186,13 +226,39 @@ async def analyze_stock_data(ticker: str, company_name: str, data: StockDataBund
     """
     Use Claude to analyze the aggregated data and generate investment thesis.
     Returns structured StockAnalysis via tool calling.
+    For tech/semiconductor stocks, includes 2026 Strategic Outlook analysis.
     """
     print("\n🧠 Analyzing data with Claude...")
 
     # Format data for Claude
     analysis_context = _format_data_for_analysis(data)
 
-    prompt = f"""You are a senior equity analyst. Analyze the following data for {company_name} ({ticker}) and provide a comprehensive investment analysis.
+    # Determine sector for 2026 context injection
+    # Try Alpha Vantage first, then fallback to yfinance
+    sector = None
+    industry = None
+    if data.alpha_vantage and data.alpha_vantage.overview:
+        sector = data.alpha_vantage.overview.sector
+        industry = data.alpha_vantage.overview.industry
+
+    # Fallback: Get sector from yfinance if not available from Alpha Vantage
+    if not sector:
+        import yfinance as yf
+        try:
+            stock = yf.Ticker(ticker)
+            info = stock.info
+            sector = info.get('sector')
+            industry = info.get('industry')
+            if sector:
+                print(f"  📂 Sector from yfinance: {sector} / {industry}")
+        except Exception:
+            pass
+
+    # Check if this is a tech/semiconductor stock
+    is_tech_semi = is_tech_semiconductor_sector(sector, industry)
+
+    # Build the analysis prompt
+    base_prompt = f"""You are a senior equity analyst. Analyze the following data for {company_name} ({ticker}) and provide a comprehensive investment analysis.
 
 {analysis_context}
 
@@ -208,10 +274,18 @@ Consider:
 
 Provide a balanced, objective analysis. Include any relevant macro/political risks in your key_risks assessment."""
 
+    # Inject 2026 context for tech/semiconductor stocks
+    if is_tech_semi:
+        context_2026 = get_2026_analysis_prompt_injection(ticker, sector)
+        prompt = base_prompt + context_2026
+        print("  📊 2026 Strategic Outlook mode (tech/semiconductor detected)")
+    else:
+        prompt = base_prompt
+
     response = await client.messages.create(
         model=MODEL,
         max_tokens=2048,
-        system="You are a professional equity research analyst. Provide data-driven, balanced analysis.",
+        system="You are a professional equity research analyst. Provide data-driven, balanced analysis. Today's date is January 2026.",
         messages=[{"role": "user", "content": prompt}],
         tools=[STOCK_ANALYSIS_TOOL],
         tool_choice={"type": "tool", "name": "stock_analysis"}
@@ -220,6 +294,24 @@ Provide a balanced, objective analysis. Include any relevant macro/political ris
     # Extract tool use result
     tool_use = next(block for block in response.content if block.type == "tool_use")
     analysis_data = tool_use.input
+
+    # Build GeopoliticalImpact2026 for tech/semiconductor stocks
+    geopolitical_2026 = None
+    if is_tech_semi:
+        # Use Claude's assessment if provided, otherwise use our estimates
+        china_exposure = analysis_data.get('china_exposure') or get_china_exposure_level(ticker, data)
+        surcharge_impact = analysis_data.get('surcharge_eps_impact') or estimate_surcharge_eps_impact(ticker, china_exposure, data)
+
+        geopolitical_2026 = GeopoliticalImpact2026(
+            china_exposure=china_exposure,
+            surcharge_eps_impact_percent=surcharge_impact,
+            technology_sovereignty_status=analysis_data.get('technology_sovereignty'),
+            process_node_status=analysis_data.get('process_node_status') or get_process_node_status(ticker),
+            software_moat=analysis_data.get('software_moat') or get_software_moat(ticker),
+            agentic_ai_positioning=analysis_data.get('agentic_ai_positioning'),
+            supply_chain_dependency=analysis_data.get('supply_chain_dependency'),
+            export_control_risk=f"BIS 25% surcharge impact: {surcharge_impact}% estimated EPS headwind"
+        )
 
     # Build StockAnalysis model
     analysis = StockAnalysis(
@@ -234,11 +326,15 @@ Provide a balanced, objective analysis. Include any relevant macro/political ris
             key_risks=analysis_data['key_risks'],
             key_catalysts=analysis_data.get('key_catalysts', []),
         ),
+        geopolitical_2026=geopolitical_2026,
         summary=analysis_data['summary'],
         price_target=analysis_data.get('price_target'),
     )
 
     print(f"✅ Analysis complete: {analysis.recommendation.value.upper()}")
+    if is_tech_semi:
+        print(f"  🌏 China Exposure: {geopolitical_2026.china_exposure.upper()}")
+        print(f"  📉 Surcharge Impact: {geopolitical_2026.surcharge_eps_impact_percent}% EPS")
     return analysis
 
 
@@ -381,14 +477,129 @@ async def write_stock_report(
 ) -> str:
     """
     Generate comprehensive markdown report with all data and source URLs.
+    For tech/semiconductor stocks, uses the 2026 Strategic Outlook template.
     """
     print("\n📝 Generating comprehensive report...")
+
+    # Determine sector for template selection
+    # Try Alpha Vantage first, then fallback to yfinance
+    sector = None
+    industry = None
+    if data.alpha_vantage and data.alpha_vantage.overview:
+        sector = data.alpha_vantage.overview.sector
+        industry = data.alpha_vantage.overview.industry
+
+    # Fallback: Get sector from yfinance if not available from Alpha Vantage
+    if not sector:
+        import yfinance as yf
+        try:
+            stock = yf.Ticker(ticker)
+            info = stock.info
+            sector = info.get('sector')
+            industry = info.get('industry')
+        except Exception:
+            pass
+
+    # Check if this is a tech/semiconductor stock
+    is_tech_semi = is_tech_semiconductor_sector(sector, industry)
 
     # Build report sections
     report_sections = []
 
-    # Header
-    report_sections.append(f"""# Stock Research Report: {ticker}
+    # Use 2026 Strategic Outlook template for tech/semiconductor
+    if is_tech_semi and analysis.geopolitical_2026:
+        print("  📊 Using 2026 Strategic Outlook template")
+        geo = analysis.geopolitical_2026
+
+        # China exposure emoji
+        china_emoji = "🔴" if geo.china_exposure == "high" else "🟡" if geo.china_exposure == "medium" else "🟢"
+
+        # Build agentic insight
+        agentic_insight = geo.agentic_ai_positioning or "Assessment pending - evaluate enterprise AI agent deployment trajectory"
+
+        # Build geopolitical insight
+        geopolitical_insight = f"China exposure {geo.china_exposure.upper()} with {geo.surcharge_eps_impact_percent}% estimated EPS impact from BIS surcharges"
+
+        # Process node info for competitive table
+        process_node = geo.process_node_status or "N/A"
+        software_moat = geo.software_moat or "N/A"
+        supply_chain = geo.supply_chain_dependency or "N/A"
+
+        # Peer comparisons (simplified)
+        peer_process_node = "TSMC 2nm (leader)" if ticker.upper() != "TSM" else "Samsung 2nm"
+        peer_software_moat = "CUDA (NVIDIA)" if ticker.upper() != "NVDA" else "ROCm (AMD)"
+        peer_supply_chain = "TSMC primary" if "TSMC" not in str(supply_chain) else "Samsung/Intel alternative"
+
+        # Technology sovereignty status
+        tech_sovereignty = geo.technology_sovereignty_status or "Evaluate CHIPS Act benefits and domestic capacity"
+
+        # Header with 2026 Strategic Outlook
+        report_sections.append(f"""# {company_name} ({ticker}) Research Report
+## 2026 Strategic Outlook
+
+*Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*
+
+---
+
+## 1. Executive Summary
+
+| | |
+|---|---|
+| **Recommendation** | **{analysis.recommendation.value.replace('_', ' ').upper()}** |
+| **Confidence** | {analysis.confidence:.0%} |
+| **Valuation** | {analysis.valuation_assessment.value.replace('_', ' ').title()} |
+{f"| **Price Target** | ${analysis.price_target:.2f} |" if analysis.price_target else ""}
+
+### Key 2026 Insights
+* **Agentic AI Positioning:** {agentic_insight}
+* **Geopolitical Risk vs. Opportunity:** {geopolitical_insight}
+
+{analysis.summary}
+
+---
+
+## 2. Technical & Competitive Moat
+
+| Feature | {ticker} Status | Top Peer Comparison |
+| :--- | :--- | :--- |
+| **Process Node** | {process_node} | {peer_process_node} |
+| **Software Moat** | {software_moat} | {peer_software_moat} |
+| **Supply Chain** | {supply_chain} | {peer_supply_chain} |
+
+---
+
+## 3. 2026 Geopolitical Impact Table
+
+| Factor | Assessment |
+|--------|------------|
+| **China Exposure** | {china_emoji} {geo.china_exposure.upper()} |
+| **Surcharge Impact** | Estimated {geo.surcharge_eps_impact_percent}% EPS impact from 2026 BIS fee structures |
+| **Technology Sovereignty** | {tech_sovereignty} |
+
+### Export Control Analysis
+{geo.export_control_risk or "BIS export restrictions apply to high-performance compute exports to China. Monitor quarterly revenue disclosures for China segment exposure."}
+
+---
+
+## 4. Investment Thesis (Bull vs. Bear)
+
+### Bull Case
+*Focus on Agentic AI revenue and technology leadership:*
+{chr(10).join(f"- {point}" for point in analysis.thesis.bull_case)}
+
+### Bear Case
+*Focus on margin compression and regulatory headwinds:*
+{chr(10).join(f"- {point}" for point in analysis.thesis.bear_case)}
+
+### Key Catalysts
+{chr(10).join(f"- {catalyst}" for catalyst in analysis.thesis.key_catalysts) if analysis.thesis.key_catalysts else "- Agentic AI enterprise adoption acceleration"}
+
+### Key Risks
+{chr(10).join(f"- {risk}" for risk in analysis.thesis.key_risks)}
+""")
+    else:
+        # Standard report template for non-tech stocks
+        report_sections.append(f"""# Stock Research Report: {ticker}
 ## {company_name}
 *Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*
 
