@@ -1,13 +1,92 @@
 """
 Stock data fetcher functions for multiple financial APIs.
 Each function returns typed Pydantic models with source URLs preserved.
+Includes retry logic with exponential backoff for reliability.
 """
 
 import os
 import asyncio
+import logging
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 import httpx
+
+from utils.retry_handler import async_retry_with_backoff
+from utils.logging_config import get_logger, log_api_call
+
+logger = get_logger(__name__)
+
+
+# =============================================================================
+# HTTP Client with Retry Logic
+# =============================================================================
+
+async def _http_get_with_retry(
+    client: httpx.AsyncClient,
+    url: str,
+    params: Optional[Dict] = None,
+    headers: Optional[Dict] = None,
+    timeout: float = 30.0,
+    max_retries: int = 3,
+) -> httpx.Response:
+    """
+    Make HTTP GET request with exponential backoff retry.
+    Retries on network errors, timeouts, and 5xx errors.
+    """
+    import random
+
+    last_exception = None
+    base_delay = 1.0
+
+    for attempt in range(max_retries + 1):
+        try:
+            response = await client.get(
+                url,
+                params=params,
+                headers=headers,
+                timeout=timeout,
+            )
+
+            # Retry on 5xx errors (server-side issues)
+            if response.status_code >= 500:
+                if attempt < max_retries:
+                    delay = base_delay * (2 ** attempt) * (1 + random.uniform(0, 0.25))
+                    logger.warning(
+                        f"HTTP {response.status_code} from {url}, retrying in {delay:.1f}s..."
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+
+            # Retry on 429 (rate limit)
+            if response.status_code == 429:
+                if attempt < max_retries:
+                    # Use Retry-After header if present
+                    retry_after = response.headers.get('Retry-After', str(base_delay * (2 ** attempt)))
+                    delay = float(retry_after) * (1 + random.uniform(0, 0.25))
+                    logger.warning(
+                        f"Rate limited by {url}, retrying in {delay:.1f}s..."
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+
+            return response
+
+        except (httpx.TimeoutException, httpx.ConnectError, httpx.ReadTimeout) as e:
+            last_exception = e
+            if attempt < max_retries:
+                delay = base_delay * (2 ** attempt) * (1 + random.uniform(0, 0.25))
+                logger.warning(
+                    f"Network error from {url}: {e}, retrying in {delay:.1f}s..."
+                )
+                await asyncio.sleep(delay)
+            else:
+                raise
+
+    # Should not reach here, but just in case
+    if last_exception:
+        raise last_exception
+    raise httpx.RequestError(f"Failed after {max_retries + 1} attempts")
+
 
 from stock_data_models import (
     SourceURL,
@@ -54,6 +133,11 @@ async def fetch_yfinance_data(ticker: str) -> YFinanceData:
         return {
             'info': info,
             'holders': holders_list,
+            # Cache sector/industry to avoid duplicate yfinance calls
+            'sector': info.get('sector'),
+            'industry': info.get('industry'),
+            'long_name': info.get('longName') or info.get('shortName'),
+            'exchange': info.get('exchange'),
         }
 
     try:
@@ -118,6 +202,11 @@ async def fetch_yfinance_data(ticker: str) -> YFinanceData:
             target_mean_price=info.get('targetMeanPrice'),
             target_high_price=info.get('targetHighPrice'),
             target_low_price=info.get('targetLowPrice'),
+            # Sector/industry cached to avoid duplicate yfinance calls
+            sector=data.get('sector'),
+            industry=data.get('industry'),
+            long_name=data.get('long_name'),
+            exchange=data.get('exchange'),
             source_urls=[SourceURL(
                 url=f"https://finance.yahoo.com/quote/{ticker}",
                 title=f"Yahoo Finance - {ticker}",
@@ -168,7 +257,8 @@ async def fetch_finnhub_data(ticker: str) -> FinnhubData:
             from_date = (today - timedelta(days=30)).strftime("%Y-%m-%d")
             to_date = today.strftime("%Y-%m-%d")
 
-            news_resp = await client.get(
+            news_resp = await _http_get_with_retry(
+                client,
                 f"{base_url}/company-news",
                 params={"symbol": ticker, "from": from_date, "to": to_date},
                 headers=headers,
@@ -195,7 +285,8 @@ async def fetch_finnhub_data(ticker: str) -> FinnhubData:
                         continue
 
             # Fetch analyst recommendations
-            rec_resp = await client.get(
+            rec_resp = await _http_get_with_retry(
+                client,
                 f"{base_url}/stock/recommendation",
                 params={"symbol": ticker},
                 headers=headers,
@@ -217,7 +308,8 @@ async def fetch_finnhub_data(ticker: str) -> FinnhubData:
                         continue
 
             # Fetch price target
-            target_resp = await client.get(
+            target_resp = await _http_get_with_retry(
+                client,
                 f"{base_url}/stock/price-target",
                 params={"symbol": ticker},
                 headers=headers,
@@ -230,7 +322,8 @@ async def fetch_finnhub_data(ticker: str) -> FinnhubData:
                 price_target_mean = target_data.get('targetMean')
 
             # Fetch insider transactions
-            insider_resp = await client.get(
+            insider_resp = await _http_get_with_retry(
+                client,
                 f"{base_url}/stock/insider-transactions",
                 params={"symbol": ticker},
                 headers=headers,
@@ -255,7 +348,8 @@ async def fetch_finnhub_data(ticker: str) -> FinnhubData:
                         continue
 
             # Fetch news sentiment
-            sentiment_resp = await client.get(
+            sentiment_resp = await _http_get_with_retry(
+                client,
                 f"{base_url}/news-sentiment",
                 params={"symbol": ticker},
                 headers=headers,
@@ -316,7 +410,9 @@ async def fetch_sec_edgar_filings(ticker: str) -> SECFilingsData:
         try:
             # First, get CIK from ticker
             tickers_url = "https://www.sec.gov/files/company_tickers.json"
-            tickers_resp = await client.get(tickers_url, headers=headers, timeout=30.0)
+            tickers_resp = await _http_get_with_retry(
+                client, tickers_url, headers=headers, timeout=30.0
+            )
 
             if tickers_resp.status_code != 200:
                 return SECFilingsData(
@@ -346,7 +442,9 @@ async def fetch_sec_edgar_filings(ticker: str) -> SECFilingsData:
 
             # Fetch recent filings
             filings_url = f"https://data.sec.gov/submissions/CIK{cik}.json"
-            filings_resp = await client.get(filings_url, headers=headers, timeout=30.0)
+            filings_resp = await _http_get_with_retry(
+                client, filings_url, headers=headers, timeout=30.0
+            )
 
             if filings_resp.status_code != 200:
                 return SECFilingsData(
@@ -471,7 +569,8 @@ async def fetch_alpha_vantage_data(ticker: str) -> AlphaVantageData:
     async with httpx.AsyncClient() as client:
         try:
             # Fetch company overview
-            overview_resp = await client.get(
+            overview_resp = await _http_get_with_retry(
+                client,
                 base_url,
                 params={"function": "OVERVIEW", "symbol": ticker, "apikey": api_key},
                 timeout=30.0
@@ -506,7 +605,8 @@ async def fetch_alpha_vantage_data(ticker: str) -> AlphaVantageData:
                     )
 
             # Fetch income statement
-            income_resp = await client.get(
+            income_resp = await _http_get_with_retry(
+                client,
                 base_url,
                 params={"function": "INCOME_STATEMENT", "symbol": ticker, "apikey": api_key},
                 timeout=30.0
@@ -525,7 +625,8 @@ async def fetch_alpha_vantage_data(ticker: str) -> AlphaVantageData:
                     ))
 
             # Fetch balance sheet
-            balance_resp = await client.get(
+            balance_resp = await _http_get_with_retry(
+                client,
                 base_url,
                 params={"function": "BALANCE_SHEET", "symbol": ticker, "apikey": api_key},
                 timeout=30.0
@@ -544,7 +645,8 @@ async def fetch_alpha_vantage_data(ticker: str) -> AlphaVantageData:
                     ))
 
             # Fetch cash flow
-            cash_resp = await client.get(
+            cash_resp = await _http_get_with_retry(
+                client,
                 base_url,
                 params={"function": "CASH_FLOW", "symbol": ticker, "apikey": api_key},
                 timeout=30.0

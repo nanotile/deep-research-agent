@@ -20,9 +20,14 @@ from pydantic import BaseModel, Field
 import resend
 
 from market_context_2026 import DEEP_RESEARCH_2026_CONTEXT
+from utils.logging_config import setup_logging, get_logger
 
 # Load environment variables
 load_dotenv()
+
+# Initialize logging
+setup_logging()
+logger = get_logger(__name__)
 
 # Initialize clients
 client = AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
@@ -38,13 +43,13 @@ if tavily_api_key and tavily_api_key != "your_tavily_api_key_here":
     except ImportError:
         print("Warning: tavily-python not installed. Using LLM knowledge fallback.")
 
-print("="*70)
-print("🔬 DEEP RESEARCH AGENT")
+logger.info("=" * 70)
+logger.info("DEEP RESEARCH AGENT")
 if tavily_client:
-    print("📡 Tavily API: Enabled (real-time web search)")
+    logger.info("Tavily API: Enabled (real-time web search)")
 else:
-    print("📚 Tavily API: Disabled (using LLM knowledge)")
-print("="*70)
+    logger.info("Tavily API: Disabled (using LLM knowledge)")
+logger.info("=" * 70)
 
 # Pydantic models for structured outputs
 class WebSearchItem(BaseModel):
@@ -67,9 +72,9 @@ class ProgressUpdate:
     message: str         # Detailed status message
     report: Optional[str] = None  # Final report (only set when complete)
 
-# Configuration
-HOW_MANY_SEARCHES = 3
-MODEL = "claude-sonnet-4-20250514"  # or "claude-opus-4-20250514" for better quality
+# Configuration - read from .env with defaults
+HOW_MANY_SEARCHES = int(os.getenv("HOW_MANY_SEARCHES", "3"))
+MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-20250514")
 
 # Tool definition for structured output
 SEARCH_PLAN_TOOL = {

@@ -36,19 +36,23 @@ from market_context_2026 import (
     CORE_2026_VARIABLES,
     GLOBAL_MARKET_CONTEXT_2026,
 )
+from utils.logging_config import get_logger
 
 # Load environment variables
 load_dotenv()
 
+# Initialize logging
+logger = get_logger(__name__)
+
 # Initialize Claude client
 client = AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
-# Configuration
-MODEL = "claude-sonnet-4-20250514"
+# Configuration - read from .env with defaults
+MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-20250514")
 
-print("=" * 70)
-print("📈 STOCK RESEARCH AGENT")
-print("=" * 70)
+logger.info("=" * 70)
+logger.info("STOCK RESEARCH AGENT")
+logger.info("=" * 70)
 
 
 # =============================================================================
@@ -187,18 +191,8 @@ async def fetch_all_stock_data(ticker: str, company_name: str) -> StockDataBundl
             setattr(bundle, source_name, result)
             print(f"  ✅ {source_name}: Success")
 
-    # Fetch macro sentiment (get sector from yfinance or alpha_vantage)
-    sector = None
-    if bundle.yfinance and bundle.yfinance.fetch_success:
-        # yfinance stores sector in the raw info, but we need to fetch it
-        import yfinance as yf
-        try:
-            stock = yf.Ticker(ticker)
-            sector = stock.info.get('sector')
-        except Exception:
-            pass
-    if not sector and bundle.alpha_vantage and bundle.alpha_vantage.overview:
-        sector = bundle.alpha_vantage.overview.sector
+    # Fetch macro sentiment (get sector from already-fetched data - no duplicate calls)
+    sector, _ = bundle.get_sector_industry()
 
     try:
         macro_result = await fetch_macro_sentiment(ticker, sector=sector)
@@ -233,26 +227,10 @@ async def analyze_stock_data(ticker: str, company_name: str, data: StockDataBund
     # Format data for Claude
     analysis_context = _format_data_for_analysis(data)
 
-    # Determine sector for 2026 context injection
-    # Try Alpha Vantage first, then fallback to yfinance
-    sector = None
-    industry = None
-    if data.alpha_vantage and data.alpha_vantage.overview:
-        sector = data.alpha_vantage.overview.sector
-        industry = data.alpha_vantage.overview.industry
-
-    # Fallback: Get sector from yfinance if not available from Alpha Vantage
-    if not sector:
-        import yfinance as yf
-        try:
-            stock = yf.Ticker(ticker)
-            info = stock.info
-            sector = info.get('sector')
-            industry = info.get('industry')
-            if sector:
-                print(f"  📂 Sector from yfinance: {sector} / {industry}")
-        except Exception:
-            pass
+    # Determine sector for 2026 context injection (use already-fetched data - no duplicate calls)
+    sector, industry = data.get_sector_industry()
+    if sector:
+        print(f"  📂 Sector: {sector} / {industry}")
 
     # Check if this is a tech/semiconductor stock
     is_tech_semi = is_tech_semiconductor_sector(sector, industry)
@@ -481,24 +459,8 @@ async def write_stock_report(
     """
     print("\n📝 Generating comprehensive report...")
 
-    # Determine sector for template selection
-    # Try Alpha Vantage first, then fallback to yfinance
-    sector = None
-    industry = None
-    if data.alpha_vantage and data.alpha_vantage.overview:
-        sector = data.alpha_vantage.overview.sector
-        industry = data.alpha_vantage.overview.industry
-
-    # Fallback: Get sector from yfinance if not available from Alpha Vantage
-    if not sector:
-        import yfinance as yf
-        try:
-            stock = yf.Ticker(ticker)
-            info = stock.info
-            sector = info.get('sector')
-            industry = info.get('industry')
-        except Exception:
-            pass
+    # Determine sector for template selection (use already-fetched data - no duplicate calls)
+    sector, industry = data.get_sector_industry()
 
     # Check if this is a tech/semiconductor stock
     is_tech_semi = is_tech_semiconductor_sector(sector, industry)

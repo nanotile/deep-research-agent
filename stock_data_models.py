@@ -232,6 +232,11 @@ class YFinanceData(DataWithSources):
     target_mean_price: Optional[float] = None
     target_high_price: Optional[float] = None
     target_low_price: Optional[float] = None
+    # Sector/industry info (to avoid duplicate yfinance calls)
+    sector: Optional[str] = None
+    industry: Optional[str] = None
+    long_name: Optional[str] = None
+    exchange: Optional[str] = None
 
 
 # =============================================================================
@@ -331,6 +336,27 @@ class StockDataBundle(BaseModel):
         if self.macro_sentiment and self.macro_sentiment.fetch_success:
             sources.append("Macro Sentiment")
         return sources
+
+    def get_sector_industry(self) -> tuple:
+        """
+        Get sector and industry from available data sources.
+        Prioritizes Alpha Vantage, falls back to yfinance.
+        Returns: (sector, industry) tuple, either may be None
+        """
+        sector = None
+        industry = None
+
+        # Try Alpha Vantage first (often more accurate)
+        if self.alpha_vantage and self.alpha_vantage.overview:
+            sector = self.alpha_vantage.overview.sector
+            industry = self.alpha_vantage.overview.industry
+
+        # Fall back to yfinance if Alpha Vantage doesn't have it
+        if not sector and self.yfinance and self.yfinance.fetch_success:
+            sector = self.yfinance.sector
+            industry = self.yfinance.industry
+
+        return sector, industry
 
 
 # =============================================================================
