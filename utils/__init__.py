@@ -12,6 +12,13 @@ from .report_history import (
     get_history_choices,
     get_report_content,
 )
+from .cache import (
+    db_cache,
+    memory_cache,
+    cached,
+    make_cache_key,
+    CachedReport,
+)
 
 __all__ = [
     'retry_with_backoff',
@@ -26,4 +33,9 @@ __all__ = [
     'add_to_history',
     'get_history_choices',
     'get_report_content',
+    'db_cache',
+    'memory_cache',
+    'cached',
+    'make_cache_key',
+    'CachedReport',
 ]

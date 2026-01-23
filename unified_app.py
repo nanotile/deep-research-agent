@@ -40,12 +40,28 @@ from portfolio_agent import (
     PortfolioProgressUpdate,
 )
 
+# Import Phase 4 agents
+from earnings_agent import (
+    earnings_calendar_with_progress,
+    EarningsProgressUpdate,
+)
+from alert_system import (
+    create_price_alert,
+    create_earnings_alert,
+    get_alert_summary,
+    cancel_alert,
+    check_all_alerts,
+    send_test_email,
+    AlertType,
+)
+
 # Import utilities
 from utils.validators import sanitize_ticker, sanitize_query
 from utils.rate_limiter import RateLimiter
 from utils.logging_config import get_logger, setup_logging
 from utils.pdf_export import markdown_to_pdf, generate_report_filename
 from utils.report_history import add_to_history, get_history_choices, get_report_content, report_history
+from utils.cache import db_cache
 
 # Load environment variables
 load_dotenv()
@@ -945,6 +961,224 @@ def run_portfolio_csv_analysis(file, request: gr.Request = None):
 
 
 # ============================================================
+# Earnings Calendar Helper Functions
+# ============================================================
+
+def run_earnings_analysis(tickers_input: str, include_sentiment: bool, request: gr.Request = None):
+    """Generator function for earnings calendar with progress updates."""
+    if not tickers_input or not tickers_input.strip():
+        yield "### ⚠️ Input Required\n\nPlease enter ticker symbols.", "*Enter tickers to analyze earnings...*"
+        return
+
+    # Parse tickers
+    tickers = [t.strip().upper() for t in tickers_input.replace(',', ' ').split() if t.strip()]
+
+    if not tickers:
+        yield "### ⚠️ Input Required\n\nNo valid ticker symbols found.", "*Enter tickers to analyze earnings...*"
+        return
+
+    # Rate limiting
+    session_id = get_session_id(request)
+    is_allowed, rate_error = stock_limiter.is_allowed(session_id)
+    if not is_allowed:
+        yield f"### ⚠️ Rate Limit\n\n{rate_error}", "*Please wait...*"
+        return
+
+    logger.info(f"Starting earnings analysis for: {tickers}")
+
+    progress_queue = Queue()
+
+    def run_async():
+        async def wrapper():
+            async for update in earnings_calendar_with_progress(tickers, include_sentiment):
+                progress_queue.put(update)
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(wrapper())
+        except Exception as e:
+            progress_queue.put(Exception(str(e)))
+        finally:
+            loop.close()
+
+    thread = Thread(target=run_async)
+    thread.start()
+
+    start_time = time.time()
+    report = f"*Analyzing earnings for {len(tickers)} ticker(s)...*"
+    last_message = "Initializing..."
+    last_stage = "Starting"
+
+    yield f"### ⏳ Starting\n\nInitializing earnings analysis...", report
+
+    while thread.is_alive() or not progress_queue.empty():
+        try:
+            update = progress_queue.get(timeout=1.0)
+
+            if isinstance(update, Exception):
+                yield f"### ❌ Error\n\n{update}", f"Error: {update}"
+                break
+
+            total_elapsed = time.time() - start_time
+            last_message = update.message
+            last_stage = update.stage_display
+
+            if update.stage == "complete":
+                status = f"### ✅ Complete!\n\n**Total time:** {total_elapsed:.1f}s\n\n**Tickers analyzed:** {update.tickers_processed}"
+                # Save to cache
+                db_cache.save_report(
+                    report_type='earnings',
+                    query=', '.join(tickers),
+                    report_content=update.report
+                )
+                yield status, update.report
+                break
+            elif update.stage == "error":
+                yield f"### ❌ Error\n\n{update.message}", f"Error: {update.message}"
+                break
+            else:
+                progress = ""
+                if update.total_tickers > 0:
+                    progress = f"\n\n**Progress:** {update.tickers_processed}/{update.total_tickers} tickers"
+                status = f"### ⏳ {update.stage_display}\n\n{update.message}{progress}\n\n**Elapsed:** {total_elapsed:.1f}s"
+                yield status, report
+
+        except:
+            # Timeout - update elapsed time to show we're still working
+            if thread.is_alive():
+                total_elapsed = time.time() - start_time
+                status = f"### ⏳ {last_stage}\n\n{last_message}\n\n**Elapsed:** {total_elapsed:.1f}s ⟳"
+                yield status, report
+
+    thread.join()
+
+
+# ============================================================
+# Alerts Helper Functions
+# ============================================================
+
+def create_new_price_alert(ticker: str, condition: str, target_price: float, email: str, request: gr.Request = None):
+    """Create a new price alert."""
+    if not ticker or not email or not target_price:
+        return "### ⚠️ Missing Fields\n\nPlease fill in all required fields.", get_alerts_display()
+
+    clean_ticker, is_valid, error = sanitize_ticker(ticker)
+    if not is_valid:
+        return f"### ⚠️ Invalid Ticker\n\n{error}", get_alerts_display()
+
+    try:
+        alert_id = create_price_alert(clean_ticker, condition, float(target_price), email)
+        logger.info(f"Created price alert {alert_id} for {clean_ticker}")
+        return f"### ✅ Alert Created\n\nAlert #{alert_id}: {clean_ticker} price {condition} ${target_price:.2f}", get_alerts_display()
+    except Exception as e:
+        logger.error(f"Error creating price alert: {e}")
+        return f"### ❌ Error\n\n{e}", get_alerts_display()
+
+
+def create_new_earnings_alert(ticker: str, days_before: int, email: str, request: gr.Request = None):
+    """Create a new earnings reminder alert."""
+    if not ticker or not email:
+        return "### ⚠️ Missing Fields\n\nPlease fill in all required fields.", get_alerts_display()
+
+    clean_ticker, is_valid, error = sanitize_ticker(ticker)
+    if not is_valid:
+        return f"### ⚠️ Invalid Ticker\n\n{error}", get_alerts_display()
+
+    try:
+        alert_id = create_earnings_alert(clean_ticker, int(days_before), email)
+        logger.info(f"Created earnings alert {alert_id} for {clean_ticker}")
+        return f"### ✅ Alert Created\n\nAlert #{alert_id}: Earnings reminder for {clean_ticker} ({days_before} days before)", get_alerts_display()
+    except Exception as e:
+        logger.error(f"Error creating earnings alert: {e}")
+        return f"### ❌ Error\n\n{e}", get_alerts_display()
+
+
+def get_alerts_display():
+    """Get formatted display of all active alerts."""
+    try:
+        summary = get_alert_summary()
+        alerts = db_cache.get_active_alerts()
+
+        if not alerts:
+            return """### 📋 Active Alerts
+
+*No active alerts. Create one above!*
+
+---
+
+**Tip:** Price alerts trigger when the stock crosses your target. Earnings alerts remind you before the announcement date.
+"""
+
+        display = f"""### 📋 Active Alerts ({summary['total_active']} total)
+
+| ID | Ticker | Type | Condition | Email |
+|---|---|---|---|---|
+"""
+        for alert in alerts:
+            alert_type = alert['alert_type'].replace('_', ' ').title()
+            display += f"| {alert['id']} | {alert['ticker']} | {alert_type} | {alert['condition']} | {alert['email'][:20]}... |\n"
+
+        display += """
+---
+
+*Click an ID above and use the cancel button to remove an alert.*
+"""
+        return display
+    except Exception as e:
+        logger.error(f"Error getting alerts display: {e}")
+        return f"### Error loading alerts\n\n{e}"
+
+
+def cancel_alert_by_id(alert_id: str):
+    """Cancel an alert by ID."""
+    if not alert_id:
+        return "### ⚠️ Enter Alert ID\n\nPlease enter the ID of the alert to cancel.", get_alerts_display()
+
+    try:
+        alert_id_int = int(alert_id)
+        success = cancel_alert(alert_id_int)
+        if success:
+            return f"### ✅ Alert Cancelled\n\nAlert #{alert_id_int} has been cancelled.", get_alerts_display()
+        else:
+            return f"### ⚠️ Not Found\n\nAlert #{alert_id_int} not found or already cancelled.", get_alerts_display()
+    except ValueError:
+        return "### ⚠️ Invalid ID\n\nPlease enter a valid numeric alert ID.", get_alerts_display()
+    except Exception as e:
+        logger.error(f"Error cancelling alert: {e}")
+        return f"### ❌ Error\n\n{e}", get_alerts_display()
+
+
+def run_alert_check():
+    """Manually run alert check."""
+    try:
+        import asyncio
+        triggered = asyncio.run(check_all_alerts())
+        if triggered:
+            result = f"### ✅ Alert Check Complete\n\n**{len(triggered)} alert(s) triggered:**\n\n"
+            for r in triggered:
+                result += f"- {r.alert.ticker}: {r.message}\n"
+            return result, get_alerts_display()
+        else:
+            return "### ✅ Alert Check Complete\n\nNo alerts triggered.", get_alerts_display()
+    except Exception as e:
+        logger.error(f"Error running alert check: {e}")
+        return f"### ❌ Error\n\n{e}", get_alerts_display()
+
+
+def run_test_email(email: str):
+    """Send a test email to verify configuration."""
+    if not email or not email.strip():
+        return "### ⚠️ Enter Email\n\nPlease enter an email address to test."
+
+    success, message = send_test_email(email.strip())
+    if success:
+        return f"### ✅ Test Email Sent\n\n{message}\n\n**Check your inbox (and spam folder).**"
+    else:
+        return f"### ❌ Email Failed\n\n{message}"
+
+
+# ============================================================
 # Unified Gradio Interface with Tabs
 # ============================================================
 
@@ -1497,6 +1731,195 @@ with gr.Blocks(title="Research Agent Hub", theme=gr.themes.Soft()) as demo:
                 fn=run_portfolio_csv_analysis,
                 inputs=[portfolio_file],
                 outputs=[portfolio_status, portfolio_output]
+            )
+
+        # ========== Earnings Calendar Tab ==========
+        with gr.Tab("📅 Earnings"):
+            gr.Markdown("""
+            ### Earnings Calendar & Analysis
+
+            Track upcoming earnings dates, analyze historical beat/miss rates, and get pre-earnings sentiment analysis.
+            """)
+
+            with gr.Row():
+                with gr.Column(scale=2):
+                    earnings_tickers = gr.Textbox(
+                        label="Ticker Symbols",
+                        placeholder="AAPL, MSFT, NVDA, GOOGL",
+                        info="Enter multiple tickers separated by commas or spaces"
+                    )
+
+                    with gr.Row():
+                        earnings_sentiment = gr.Checkbox(
+                            label="Include Sentiment Analysis",
+                            value=True,
+                            info="Adds news sentiment (slower but more insightful)"
+                        )
+
+                    with gr.Row():
+                        earnings_submit_btn = gr.Button("📅 Analyze Earnings", variant="primary", scale=2)
+                        earnings_clear_btn = gr.Button("🗑️ Clear", scale=1)
+
+                with gr.Column(scale=1):
+                    earnings_status = gr.Markdown(
+                        value="### ⏳ Ready\n\nEnter ticker symbols and click **Analyze Earnings**",
+                        label="Status"
+                    )
+
+            earnings_output = gr.Markdown(
+                value="*Earnings analysis will appear here...*"
+            )
+
+            # Quick watchlist buttons
+            with gr.Accordion("📋 Quick Watchlists", open=False):
+                gr.Markdown("Click to load a watchlist:")
+                with gr.Row():
+                    gr.Button("Tech Giants").click(
+                        lambda: "AAPL, MSFT, GOOGL, AMZN, META, NVDA",
+                        outputs=[earnings_tickers]
+                    )
+                    gr.Button("Financials").click(
+                        lambda: "JPM, BAC, WFC, GS, MS, C",
+                        outputs=[earnings_tickers]
+                    )
+                    gr.Button("Semiconductors").click(
+                        lambda: "NVDA, AMD, INTC, TSM, AVGO, QCOM",
+                        outputs=[earnings_tickers]
+                    )
+
+            earnings_submit_btn.click(
+                fn=run_earnings_analysis,
+                inputs=[earnings_tickers, earnings_sentiment],
+                outputs=[earnings_status, earnings_output]
+            )
+
+            earnings_clear_btn.click(
+                lambda: ("", "### ⏳ Ready\n\nEnter ticker symbols and click **Analyze Earnings**", "*Earnings analysis will appear here...*"),
+                outputs=[earnings_tickers, earnings_status, earnings_output]
+            )
+
+        # ========== Alerts Tab ==========
+        with gr.Tab("🔔 Alerts"):
+            gr.Markdown("""
+            ### Price & Earnings Alerts
+
+            Set up alerts to be notified when stocks hit your price targets or when earnings dates approach.
+
+            **Important:**
+            - Alerts are checked when you click **"Check Alerts Now"** button
+            - Email notifications require `RESEND_API_KEY` in your `.env` file
+            - With Resend free tier, emails can only be sent to your verified email address
+            """)
+
+            with gr.Row():
+                # Left column - Create alerts
+                with gr.Column(scale=1):
+                    gr.Markdown("#### Create New Alert")
+
+                    with gr.Tab("Price Alert"):
+                        price_alert_ticker = gr.Textbox(
+                            label="Ticker",
+                            placeholder="AAPL"
+                        )
+                        price_alert_condition = gr.Radio(
+                            label="Condition",
+                            choices=["above", "below"],
+                            value="above"
+                        )
+                        price_alert_target = gr.Number(
+                            label="Target Price ($)",
+                            value=150.00
+                        )
+                        price_alert_email = gr.Textbox(
+                            label="Email",
+                            placeholder="your@email.com"
+                        )
+                        price_alert_btn = gr.Button("📈 Create Price Alert", variant="primary")
+
+                    with gr.Tab("Earnings Alert"):
+                        earnings_alert_ticker = gr.Textbox(
+                            label="Ticker",
+                            placeholder="AAPL"
+                        )
+                        earnings_alert_days = gr.Slider(
+                            label="Days Before Earnings",
+                            minimum=1,
+                            maximum=14,
+                            value=3,
+                            step=1
+                        )
+                        earnings_alert_email = gr.Textbox(
+                            label="Email",
+                            placeholder="your@email.com"
+                        )
+                        earnings_alert_btn = gr.Button("📅 Create Earnings Alert", variant="primary")
+
+                # Right column - Manage alerts
+                with gr.Column(scale=1):
+                    gr.Markdown("#### Manage Alerts")
+
+                    alert_status = gr.Markdown(
+                        value="### Ready\n\nCreate an alert using the form on the left."
+                    )
+
+                    alerts_display = gr.Markdown(
+                        value=get_alerts_display()
+                    )
+
+                    with gr.Row():
+                        cancel_alert_id = gr.Textbox(
+                            label="Alert ID to Cancel",
+                            placeholder="1"
+                        )
+                        cancel_alert_btn = gr.Button("❌ Cancel Alert")
+
+                    with gr.Row():
+                        check_alerts_btn = gr.Button("🔄 Check Alerts Now", variant="secondary")
+                        refresh_alerts_btn = gr.Button("🔃 Refresh List")
+
+                    # Test email section
+                    with gr.Accordion("📧 Test Email Configuration", open=False):
+                        test_email_input = gr.Textbox(
+                            label="Email Address",
+                            placeholder="your@email.com",
+                            info="Send a test email to verify your setup"
+                        )
+                        test_email_btn = gr.Button("📧 Send Test Email")
+                        test_email_status = gr.Markdown(value="")
+
+            # Event handlers
+            price_alert_btn.click(
+                fn=create_new_price_alert,
+                inputs=[price_alert_ticker, price_alert_condition, price_alert_target, price_alert_email],
+                outputs=[alert_status, alerts_display]
+            )
+
+            earnings_alert_btn.click(
+                fn=create_new_earnings_alert,
+                inputs=[earnings_alert_ticker, earnings_alert_days, earnings_alert_email],
+                outputs=[alert_status, alerts_display]
+            )
+
+            cancel_alert_btn.click(
+                fn=cancel_alert_by_id,
+                inputs=[cancel_alert_id],
+                outputs=[alert_status, alerts_display]
+            )
+
+            check_alerts_btn.click(
+                fn=run_alert_check,
+                outputs=[alert_status, alerts_display]
+            )
+
+            refresh_alerts_btn.click(
+                fn=lambda: ("### ✅ Refreshed", get_alerts_display()),
+                outputs=[alert_status, alerts_display]
+            )
+
+            test_email_btn.click(
+                fn=run_test_email,
+                inputs=[test_email_input],
+                outputs=[test_email_status]
             )
 
     # Footer
