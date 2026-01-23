@@ -24,6 +24,22 @@ from deep_research_agent import (
 from stock_research_agent import stock_research_with_progress
 from stock_data_models import StockProgressUpdate
 
+# Import new Phase 3 agents
+from sector_research_agent import (
+    sector_research_with_progress,
+    get_available_sectors,
+    get_sector_info,
+    SectorProgressUpdate,
+)
+from competitor_agent import (
+    competitor_analysis_with_progress,
+    CompetitorProgressUpdate,
+)
+from portfolio_agent import (
+    portfolio_analysis_with_progress,
+    PortfolioProgressUpdate,
+)
+
 # Import utilities
 from utils.validators import sanitize_ticker, sanitize_query
 from utils.rate_limiter import RateLimiter
@@ -599,6 +615,336 @@ def run_stock_comparison(ticker1: str, ticker2: str, ticker3: str = "", request:
 
 
 # ============================================================
+# Sector Research Helper Functions
+# ============================================================
+
+def run_sector_research(sector: str, request: gr.Request = None):
+    """Generator function for sector research with progress updates."""
+    if not sector:
+        yield "### ⚠️ Input Required\n\nPlease select a sector.", "*Select a sector to analyze...*"
+        return
+
+    # Rate limiting
+    session_id = get_session_id(request)
+    is_allowed, rate_error = research_limiter.is_allowed(session_id)
+    if not is_allowed:
+        yield f"### ⚠️ Rate Limit\n\n{rate_error}", "*Please wait...*"
+        return
+
+    logger.info(f"Starting sector research for: {sector}")
+
+    progress_queue = Queue()
+
+    def run_async():
+        async def wrapper():
+            async for update in sector_research_with_progress(sector):
+                progress_queue.put(update)
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(wrapper())
+        except Exception as e:
+            progress_queue.put(Exception(str(e)))
+        finally:
+            loop.close()
+
+    thread = Thread(target=run_async)
+    thread.start()
+
+    start_time = time.time()
+    report = f"*Analyzing {sector} sector...*"
+    last_message = "Initializing..."
+    last_stage = "Starting"
+
+    yield f"### ⏳ Starting\n\nInitializing sector analysis for **{sector}**...", report
+
+    while thread.is_alive() or not progress_queue.empty():
+        try:
+            update = progress_queue.get(timeout=1.0)
+
+            if isinstance(update, Exception):
+                yield f"### ❌ Error\n\n{update}", f"Error: {update}"
+                break
+
+            total_elapsed = time.time() - start_time
+            last_message = update.message
+            last_stage = update.stage_display
+
+            if update.stage == "complete":
+                status = f"### ✅ Complete!\n\n**Total time:** {total_elapsed:.1f}s\n\n**Companies analyzed:** {update.companies_fetched}"
+                yield status, update.report
+                break
+            elif update.stage == "error":
+                yield f"### ❌ Error\n\n{update.message}", f"Error: {update.message}"
+                break
+            else:
+                progress = ""
+                if update.total_companies > 0:
+                    progress = f"\n\n**Progress:** {update.companies_fetched}/{update.total_companies} companies"
+                status = f"### ⏳ {update.stage_display}\n\n{update.message}{progress}\n\n**Elapsed:** {total_elapsed:.1f}s"
+                yield status, report
+
+        except:
+            # Timeout - update elapsed time to show we're still working
+            if thread.is_alive():
+                total_elapsed = time.time() - start_time
+                status = f"### ⏳ {last_stage}\n\n{last_message}\n\n**Elapsed:** {total_elapsed:.1f}s ⟳"
+                yield status, report
+
+    thread.join()
+
+
+# ============================================================
+# Competitor Analysis Helper Functions
+# ============================================================
+
+def run_competitor_analysis(ticker: str, request: gr.Request = None):
+    """Generator function for competitor analysis with progress updates."""
+    if not ticker or not ticker.strip():
+        yield "### ⚠️ Input Required\n\nPlease enter a ticker symbol.", "*Enter a ticker to analyze its competitors...*"
+        return
+
+    sanitized_ticker, is_valid, error = sanitize_ticker(ticker)
+    if not is_valid:
+        yield f"### ⚠️ Invalid Ticker\n\n{error}", "*Please enter a valid ticker...*"
+        return
+
+    # Rate limiting
+    session_id = get_session_id(request)
+    is_allowed, rate_error = stock_limiter.is_allowed(session_id)
+    if not is_allowed:
+        yield f"### ⚠️ Rate Limit\n\n{rate_error}", "*Please wait...*"
+        return
+
+    logger.info(f"Starting competitor analysis for: {sanitized_ticker}")
+
+    progress_queue = Queue()
+
+    def run_async():
+        async def wrapper():
+            async for update in competitor_analysis_with_progress(sanitized_ticker):
+                progress_queue.put(update)
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(wrapper())
+        except Exception as e:
+            progress_queue.put(Exception(str(e)))
+        finally:
+            loop.close()
+
+    thread = Thread(target=run_async)
+    thread.start()
+
+    start_time = time.time()
+    report = f"*Analyzing competitors for {sanitized_ticker}...*"
+    last_message = "Finding competitors..."
+    last_stage = "Starting"
+
+    yield f"### ⏳ Starting\n\nFinding competitors for **{sanitized_ticker}**...", report
+
+    while thread.is_alive() or not progress_queue.empty():
+        try:
+            update = progress_queue.get(timeout=1.0)
+
+            if isinstance(update, Exception):
+                yield f"### ❌ Error\n\n{update}", f"Error: {update}"
+                break
+
+            total_elapsed = time.time() - start_time
+            last_message = update.message
+            last_stage = update.stage_display
+
+            if update.stage == "complete":
+                status = f"### ✅ Complete!\n\n**Total time:** {total_elapsed:.1f}s"
+                yield status, update.report
+                break
+            elif update.stage == "error":
+                yield f"### ❌ Error\n\n{update.message}", f"Error: {update.message}"
+                break
+            else:
+                status = f"### ⏳ {update.stage_display}\n\n{update.message}\n\n**Elapsed:** {total_elapsed:.1f}s"
+                yield status, report
+
+        except:
+            # Timeout - update elapsed time to show we're still working
+            if thread.is_alive():
+                total_elapsed = time.time() - start_time
+                status = f"### ⏳ {last_stage}\n\n{last_message}\n\n**Elapsed:** {total_elapsed:.1f}s ⟳"
+                yield status, report
+
+    thread.join()
+
+
+# ============================================================
+# Portfolio Analysis Helper Functions
+# ============================================================
+
+def run_portfolio_analysis(portfolio_text: str, request: gr.Request = None):
+    """Generator function for portfolio analysis with progress updates."""
+    if not portfolio_text or not portfolio_text.strip():
+        yield "### ⚠️ Input Required\n\nPlease enter your portfolio holdings.", "*Enter your holdings to analyze...*"
+        return
+
+    # Rate limiting
+    session_id = get_session_id(request)
+    is_allowed, rate_error = research_limiter.is_allowed(session_id)
+    if not is_allowed:
+        yield f"### ⚠️ Rate Limit\n\n{rate_error}", "*Please wait...*"
+        return
+
+    logger.info("Starting portfolio analysis")
+
+    progress_queue = Queue()
+
+    def run_async():
+        async def wrapper():
+            async for update in portfolio_analysis_with_progress(portfolio_text, is_csv=False):
+                progress_queue.put(update)
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(wrapper())
+        except Exception as e:
+            progress_queue.put(Exception(str(e)))
+        finally:
+            loop.close()
+
+    thread = Thread(target=run_async)
+    thread.start()
+
+    start_time = time.time()
+    report = "*Analyzing portfolio...*"
+    last_message = "Parsing portfolio data..."
+    last_stage = "Starting"
+
+    yield "### ⏳ Starting\n\nParsing portfolio data...", report
+
+    while thread.is_alive() or not progress_queue.empty():
+        try:
+            update = progress_queue.get(timeout=1.0)
+
+            if isinstance(update, Exception):
+                yield f"### ❌ Error\n\n{update}", f"Error: {update}"
+                break
+
+            total_elapsed = time.time() - start_time
+            last_message = update.message
+            last_stage = update.stage_display
+
+            if update.stage == "complete":
+                status = f"### ✅ Complete!\n\n**Total time:** {total_elapsed:.1f}s\n\n**Holdings analyzed:** {update.holdings_processed}"
+                yield status, update.report
+                break
+            elif update.stage == "error":
+                yield f"### ❌ Error\n\n{update.message}", f"Error: {update.message}"
+                break
+            else:
+                progress = ""
+                if update.total_holdings > 0:
+                    progress = f"\n\n**Progress:** {update.holdings_processed}/{update.total_holdings} holdings"
+                status = f"### ⏳ {update.stage_display}\n\n{update.message}{progress}\n\n**Elapsed:** {total_elapsed:.1f}s"
+                yield status, report
+
+        except:
+            # Timeout - update elapsed time to show we're still working
+            if thread.is_alive():
+                total_elapsed = time.time() - start_time
+                status = f"### ⏳ {last_stage}\n\n{last_message}\n\n**Elapsed:** {total_elapsed:.1f}s ⟳"
+                yield status, report
+
+    thread.join()
+
+
+def run_portfolio_csv_analysis(file, request: gr.Request = None):
+    """Handle CSV file upload for portfolio analysis."""
+    if file is None:
+        yield "### ⚠️ No File\n\nPlease upload a CSV file.", "*Upload a CSV file with your holdings...*"
+        return
+
+    try:
+        # Read CSV content
+        with open(file.name, 'r') as f:
+            csv_content = f.read()
+    except Exception as e:
+        yield f"### ❌ Error\n\nCould not read file: {e}", "*Please try again...*"
+        return
+
+    # Rate limiting
+    session_id = get_session_id(request)
+    is_allowed, rate_error = research_limiter.is_allowed(session_id)
+    if not is_allowed:
+        yield f"### ⚠️ Rate Limit\n\n{rate_error}", "*Please wait...*"
+        return
+
+    logger.info("Starting portfolio CSV analysis")
+
+    progress_queue = Queue()
+
+    def run_async():
+        async def wrapper():
+            async for update in portfolio_analysis_with_progress(csv_content, is_csv=True):
+                progress_queue.put(update)
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(wrapper())
+        except Exception as e:
+            progress_queue.put(Exception(str(e)))
+        finally:
+            loop.close()
+
+    thread = Thread(target=run_async)
+    thread.start()
+
+    start_time = time.time()
+    report = "*Analyzing portfolio from CSV...*"
+    last_message = "Parsing CSV file..."
+    last_stage = "Starting"
+
+    yield "### ⏳ Starting\n\nParsing CSV file...", report
+
+    while thread.is_alive() or not progress_queue.empty():
+        try:
+            update = progress_queue.get(timeout=1.0)
+
+            if isinstance(update, Exception):
+                yield f"### ❌ Error\n\n{update}", f"Error: {update}"
+                break
+
+            total_elapsed = time.time() - start_time
+            last_message = update.message
+            last_stage = update.stage_display
+
+            if update.stage == "complete":
+                status = f"### ✅ Complete!\n\n**Total time:** {total_elapsed:.1f}s\n\n**Holdings analyzed:** {update.holdings_processed}"
+                yield status, update.report
+                break
+            elif update.stage == "error":
+                yield f"### ❌ Error\n\n{update.message}", f"Error: {update.message}"
+                break
+            else:
+                progress = ""
+                if update.total_holdings > 0:
+                    progress = f"\n\n**Progress:** {update.holdings_processed}/{update.total_holdings} holdings"
+                status = f"### ⏳ {update.stage_display}\n\n{update.message}{progress}\n\n**Elapsed:** {total_elapsed:.1f}s"
+                yield status, report
+
+        except:
+            # Timeout - update elapsed time to show we're still working
+            if thread.is_alive():
+                total_elapsed = time.time() - start_time
+                status = f"### ⏳ {last_stage}\n\n{last_message}\n\n**Elapsed:** {total_elapsed:.1f}s ⟳"
+                yield status, report
+
+    thread.join()
+
+
+# ============================================================
 # Unified Gradio Interface with Tabs
 # ============================================================
 
@@ -988,6 +1334,169 @@ with gr.Blocks(title="Research Agent Hub", theme=gr.themes.Soft()) as demo:
                 fn=run_stock_comparison,
                 inputs=[compare_ticker1, compare_ticker2, compare_ticker3],
                 outputs=[compare_status, compare_output]
+            )
+
+        # ========== Sector Research Tab ==========
+        with gr.Tab("🏭 Sector Research"):
+            gr.Markdown("""
+            ### Sector-Wide Analysis
+
+            Analyze an entire sector: top companies, industry trends, competitive dynamics, and investment outlook.
+            """)
+
+            with gr.Row():
+                with gr.Column(scale=2):
+                    sector_dropdown = gr.Dropdown(
+                        label="Select Sector",
+                        choices=get_available_sectors(),
+                        value="Technology",
+                        interactive=True
+                    )
+
+                    sector_submit_btn = gr.Button("🏭 Analyze Sector", variant="primary")
+
+                    # Sector quick info
+                    gr.Markdown("**Available Sectors:** Technology, Semiconductors, Healthcare, Financial Services, Energy, Consumer Discretionary, Industrials, Real Estate")
+
+                with gr.Column(scale=1):
+                    sector_status = gr.Markdown(
+                        value="### ⏳ Ready\n\nSelect a sector and click **Analyze Sector**",
+                        label="Status"
+                    )
+
+            sector_output = gr.Markdown(
+                value="*Sector analysis report will appear here...*"
+            )
+
+            sector_submit_btn.click(
+                fn=run_sector_research,
+                inputs=[sector_dropdown],
+                outputs=[sector_status, sector_output]
+            )
+
+        # ========== Competitor Intelligence Tab ==========
+        with gr.Tab("🎯 Competitors"):
+            gr.Markdown("""
+            ### Competitive Intelligence
+
+            Enter a stock ticker to automatically identify competitors and generate a competitive analysis.
+            Includes market position, competitive advantages, and strategic recommendations.
+            """)
+
+            with gr.Row():
+                with gr.Column(scale=2):
+                    competitor_ticker_input = gr.Textbox(
+                        label="Stock Ticker",
+                        placeholder="e.g., NVDA, AAPL, TSLA",
+                        max_lines=1
+                    )
+
+                    competitor_submit_btn = gr.Button("🎯 Analyze Competitors", variant="primary")
+
+                    gr.Examples(
+                        examples=["NVDA", "AAPL", "TSLA", "JPM", "AMZN", "NFLX"],
+                        inputs=competitor_ticker_input,
+                        label="Popular Tickers"
+                    )
+
+                with gr.Column(scale=1):
+                    competitor_status = gr.Markdown(
+                        value="### ⏳ Ready\n\nEnter a ticker to analyze its competitors",
+                        label="Status"
+                    )
+
+            competitor_output = gr.Markdown(
+                value="*Competitive analysis will appear here...*"
+            )
+
+            competitor_submit_btn.click(
+                fn=run_competitor_analysis,
+                inputs=[competitor_ticker_input],
+                outputs=[competitor_status, competitor_output]
+            )
+
+            competitor_ticker_input.submit(
+                fn=run_competitor_analysis,
+                inputs=[competitor_ticker_input],
+                outputs=[competitor_status, competitor_output]
+            )
+
+        # ========== Portfolio Analyzer Tab ==========
+        with gr.Tab("💼 Portfolio"):
+            gr.Markdown("""
+            ### Portfolio Analyzer
+
+            Enter your portfolio holdings to get:
+            - **Sector Exposure Analysis** - Understand your diversification
+            - **Risk Assessment** - Concentration warnings and risk metrics
+            - **Rebalancing Suggestions** - AI-powered recommendations
+            """)
+
+            with gr.Row():
+                with gr.Column(scale=2):
+                    gr.Markdown("**Enter holdings (one per line):** `TICKER SHARES [COST_BASIS]`")
+
+                    portfolio_input = gr.Textbox(
+                        label="Portfolio Holdings",
+                        placeholder="AAPL 50\nMSFT 30\nGOOGL 20 150.00\nNVDA 15\nAMZN 25",
+                        lines=8
+                    )
+
+                    with gr.Row():
+                        portfolio_submit_btn = gr.Button("💼 Analyze Portfolio", variant="primary", scale=2)
+                        portfolio_clear_btn = gr.Button("🗑️ Clear", scale=1)
+
+                    # CSV Upload option
+                    with gr.Accordion("📁 Or Upload CSV", open=False):
+                        gr.Markdown("CSV format: `ticker,shares,cost_basis` (cost_basis optional)")
+                        portfolio_file = gr.File(
+                            label="Upload Portfolio CSV",
+                            file_types=[".csv"],
+                        )
+                        portfolio_csv_btn = gr.Button("📁 Analyze CSV")
+
+                with gr.Column(scale=1):
+                    portfolio_status = gr.Markdown(
+                        value="### ⏳ Ready\n\nEnter your holdings and click **Analyze Portfolio**",
+                        label="Status"
+                    )
+
+            portfolio_output = gr.Markdown(
+                value="*Portfolio analysis will appear here...*"
+            )
+
+            # Example portfolios
+            with gr.Accordion("📋 Example Portfolios", open=False):
+                gr.Markdown("Click to load an example portfolio:")
+                with gr.Row():
+                    gr.Button("Tech Heavy").click(
+                        lambda: "AAPL 50\nMSFT 40\nGOOGL 30\nNVDA 25\nMETA 20",
+                        outputs=[portfolio_input]
+                    )
+                    gr.Button("Balanced").click(
+                        lambda: "AAPL 30\nJPM 25\nJNJ 25\nXOM 20\nPG 20\nVZ 15\nHD 15",
+                        outputs=[portfolio_input]
+                    )
+                    gr.Button("Dividend").click(
+                        lambda: "JNJ 40\nPG 35\nKO 30\nPEP 30\nVZ 25\nT 25\nO 20",
+                        outputs=[portfolio_input]
+                    )
+
+            portfolio_submit_btn.click(
+                fn=run_portfolio_analysis,
+                inputs=[portfolio_input],
+                outputs=[portfolio_status, portfolio_output]
+            )
+
+            portfolio_clear_btn.click(
+                lambda: ("", "### ⏳ Ready\n\nEnter your holdings and click **Analyze Portfolio**", "*Portfolio analysis will appear here...*"),
+                outputs=[portfolio_input, portfolio_status, portfolio_output]
+            )
+
+            portfolio_csv_btn.click(
+                fn=run_portfolio_csv_analysis,
+                inputs=[portfolio_file],
+                outputs=[portfolio_status, portfolio_output]
             )
 
     # Footer
