@@ -470,3 +470,9 @@ class StockProgressUpdate(BaseModel):
     # Final outputs (only set when complete)
     report: Optional[str] = None
     analysis: Optional[StockAnalysis] = None
+
+    # Token tracking
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    estimated_cost: float = 0.0

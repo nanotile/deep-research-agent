@@ -50,6 +50,32 @@ client = AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 # Configuration - read from .env with defaults
 MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-20250514")
 
+# Token tracking accumulator
+class TokenAccumulator:
+    """Accumulates token usage across multiple API calls."""
+    def __init__(self):
+        self.input_tokens = 0
+        self.output_tokens = 0
+
+    def add(self, response):
+        """Extract and add tokens from an API response."""
+        if hasattr(response, 'usage'):
+            self.input_tokens += getattr(response.usage, 'input_tokens', 0)
+            self.output_tokens += getattr(response.usage, 'output_tokens', 0)
+
+    @property
+    def total_tokens(self):
+        return self.input_tokens + self.output_tokens
+
+    @property
+    def estimated_cost(self):
+        # Claude Sonnet: $3/1M input, $15/1M output
+        return (self.input_tokens / 1_000_000) * 3.0 + (self.output_tokens / 1_000_000) * 15.0
+
+    def reset(self):
+        self.input_tokens = 0
+        self.output_tokens = 0
+
 logger.info("=" * 70)
 logger.info("STOCK RESEARCH AGENT")
 logger.info("=" * 70)
@@ -216,7 +242,7 @@ async def fetch_all_stock_data(ticker: str, company_name: str) -> StockDataBundl
 # Analysis Agent
 # =============================================================================
 
-async def analyze_stock_data(ticker: str, company_name: str, data: StockDataBundle) -> StockAnalysis:
+async def analyze_stock_data(ticker: str, company_name: str, data: StockDataBundle, tokens: TokenAccumulator = None) -> StockAnalysis:
     """
     Use Claude to analyze the aggregated data and generate investment thesis.
     Returns structured StockAnalysis via tool calling.
@@ -268,6 +294,10 @@ Provide a balanced, objective analysis. Include any relevant macro/political ris
         tools=[STOCK_ANALYSIS_TOOL],
         tool_choice={"type": "tool", "name": "stock_analysis"}
     )
+
+    # Track tokens
+    if tokens:
+        tokens.add(response)
 
     # Extract tool use result
     tool_use = next(block for block in response.content if block.type == "tool_use")
@@ -881,6 +911,9 @@ async def stock_research_with_progress(ticker: str) -> AsyncIterator[StockProgre
     ticker = ticker.upper().strip()
     start_time = time.time()
 
+    # Initialize token tracking
+    tokens = TokenAccumulator()
+
     # Stage 1: Validate
     yield StockProgressUpdate(
         stage="validating",
@@ -982,7 +1015,7 @@ async def stock_research_with_progress(ticker: str) -> AsyncIterator[StockProgre
         message="Analyzing data with Claude..."
     )
 
-    analysis = await analyze_stock_data(ticker, company_name, data)
+    analysis = await analyze_stock_data(ticker, company_name, data, tokens)
 
     yield StockProgressUpdate(
         stage="analyzing",
@@ -990,7 +1023,11 @@ async def stock_research_with_progress(ticker: str) -> AsyncIterator[StockProgre
         current_step=1,
         total_steps=1,
         elapsed_time=time.time() - stage_start,
-        message=f"Analysis complete: {analysis.recommendation.value.replace('_', ' ').upper()}"
+        message=f"Analysis complete: {analysis.recommendation.value.replace('_', ' ').upper()}",
+        input_tokens=tokens.input_tokens,
+        output_tokens=tokens.output_tokens,
+        total_tokens=tokens.total_tokens,
+        estimated_cost=tokens.estimated_cost
     )
 
     # Stage 4: Write report
@@ -1024,7 +1061,11 @@ async def stock_research_with_progress(ticker: str) -> AsyncIterator[StockProgre
         elapsed_time=time.time() - start_time,
         message="Research complete!",
         report=report,
-        analysis=analysis
+        analysis=analysis,
+        input_tokens=tokens.input_tokens,
+        output_tokens=tokens.output_tokens,
+        total_tokens=tokens.total_tokens,
+        estimated_cost=tokens.estimated_cost
     )
 
 

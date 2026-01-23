@@ -205,6 +205,10 @@ def run_research_with_progress(query: str, request: gr.Request = None):
 
             if update.stage == "complete":
                 status = f"### ✅ Complete!\n\n**Total time:** {total_elapsed:.1f}s"
+                # Add token usage to completion status
+                if update.total_tokens > 0:
+                    status += f"\n\n📊 **Token Usage:** {update.total_tokens:,} tokens (${update.estimated_cost:.4f})"
+                    status += f"\n   - Input: {update.input_tokens:,} | Output: {update.output_tokens:,}"
                 yield status, update.report
                 break
             else:
@@ -432,6 +436,10 @@ def run_stock_research(ticker: str, request: gr.Request = None):
                 if update.analysis:
                     rec = update.analysis.recommendation.value.replace('_', ' ').upper()
                     status += f"\n\n**Recommendation:** {rec}"
+                # Add token usage
+                if update.total_tokens > 0:
+                    status += f"\n\n📊 **Token Usage:** {update.total_tokens:,} tokens (${update.estimated_cost:.4f})"
+                    status += f"\n   - Input: {update.input_tokens:,} | Output: {update.output_tokens:,}"
                 yield status, update.report
                 break
             else:
