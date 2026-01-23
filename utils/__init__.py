@@ -19,6 +19,13 @@ from .cache import (
     make_cache_key,
     CachedReport,
 )
+from .token_tracker import (
+    token_tracker,
+    TokenUsage,
+    SessionTokenUsage,
+    extract_usage_from_response,
+    format_token_display,
+)
 
 __all__ = [
     'retry_with_backoff',
@@ -38,4 +45,9 @@ __all__ = [
     'cached',
     'make_cache_key',
     'CachedReport',
+    'token_tracker',
+    'TokenUsage',
+    'SessionTokenUsage',
+    'extract_usage_from_response',
+    'format_token_display',
 ]

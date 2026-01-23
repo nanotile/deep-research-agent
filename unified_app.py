@@ -136,6 +136,11 @@ def format_research_progress(update: ProgressUpdate, total_elapsed: float) -> st
 
     lines.append(f"\n---\n**Total elapsed:** {total_elapsed:.1f}s")
 
+    # Add token usage if available
+    if update.total_tokens > 0:
+        lines.append(f"\n📊 **Token Usage:** {update.total_tokens:,} tokens (${update.estimated_cost:.4f})")
+        lines.append(f"   - Input: {update.input_tokens:,} | Output: {update.output_tokens:,}")
+
     return "\n".join(lines)
 
 

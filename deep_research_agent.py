@@ -21,6 +21,7 @@ import resend
 
 from market_context_2026 import DEEP_RESEARCH_2026_CONTEXT
 from utils.logging_config import setup_logging, get_logger
+from utils.token_tracker import extract_usage_from_response, format_token_display
 
 # Load environment variables
 load_dotenv()
@@ -71,10 +72,41 @@ class ProgressUpdate:
     elapsed_time: float  # Seconds elapsed for current stage
     message: str         # Detailed status message
     report: Optional[str] = None  # Final report (only set when complete)
+    # Token tracking
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    estimated_cost: float = 0.0
 
 # Configuration - read from .env with defaults
 HOW_MANY_SEARCHES = int(os.getenv("HOW_MANY_SEARCHES", "3"))
 MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-20250514")
+
+# Token tracking accumulator
+class TokenAccumulator:
+    """Accumulates token usage across multiple API calls."""
+    def __init__(self):
+        self.input_tokens = 0
+        self.output_tokens = 0
+
+    def add(self, response):
+        """Extract and add tokens from an API response."""
+        if hasattr(response, 'usage'):
+            self.input_tokens += getattr(response.usage, 'input_tokens', 0)
+            self.output_tokens += getattr(response.usage, 'output_tokens', 0)
+
+    @property
+    def total_tokens(self):
+        return self.input_tokens + self.output_tokens
+
+    @property
+    def estimated_cost(self):
+        # Claude Sonnet: $3/1M input, $15/1M output
+        return (self.input_tokens / 1_000_000) * 3.0 + (self.output_tokens / 1_000_000) * 15.0
+
+    def reset(self):
+        self.input_tokens = 0
+        self.output_tokens = 0
 
 # Tool definition for structured output
 SEARCH_PLAN_TOOL = {
@@ -106,7 +138,7 @@ SEARCH_PLAN_TOOL = {
     }
 }
 
-async def plan_searches(query: str) -> List[Dict[str, str]]:
+async def plan_searches(query: str, tokens: TokenAccumulator = None) -> List[Dict[str, str]]:
     """
     Planning Agent: Generate search queries based on the research topic
     Updated for 2026 context awareness.
@@ -148,6 +180,10 @@ async def plan_searches(query: str) -> List[Dict[str, str]]:
         tool_choice={"type": "tool", "name": "create_search_plan"}
     )
 
+    # Track tokens
+    if tokens:
+        tokens.add(response)
+
     # Extract tool use result
     tool_use = next(block for block in response.content if block.type == "tool_use")
     search_plan = tool_use.input
@@ -164,7 +200,7 @@ async def plan_searches(query: str) -> List[Dict[str, str]]:
 
     return search_items
 
-async def search_with_tavily(search_term: str) -> str:
+async def search_with_tavily(search_term: str, tokens: TokenAccumulator = None) -> str:
     """
     Execute a Tavily web search and synthesize results with Claude.
     Returns a summary string compatible with the existing pipeline.
@@ -209,6 +245,10 @@ Be specific and factual. Do not include URLs or source citations."""
         temperature=0.3
     )
 
+    # Track tokens
+    if tokens:
+        tokens.add(response)
+
     return response.content[0].text
 
 
@@ -224,7 +264,7 @@ def _is_tech_ai_query(query: str) -> bool:
     return any(keyword in query_lower for keyword in tech_keywords)
 
 
-async def search_with_llm_knowledge(search_term: str) -> str:
+async def search_with_llm_knowledge(search_term: str, tokens: TokenAccumulator = None) -> str:
     """
     Fallback: Use LLM's knowledge base for research when Tavily is unavailable.
     Updated for January 2026 knowledge context.
@@ -255,6 +295,10 @@ Write only the summary, no additional commentary."""
         messages=[{"role": "user", "content": research_prompt}],
         temperature=0.3
     )
+
+    # Track tokens
+    if tokens:
+        tokens.add(response)
 
     return response.content[0].text
 
@@ -293,7 +337,7 @@ async def execute_searches(search_items: List[Dict[str, str]]) -> List[Dict[str,
 
     return search_results
 
-async def write_report(query: str, search_results: List[Dict[str, str]]) -> str:
+async def write_report(query: str, search_results: List[Dict[str, str]], tokens: TokenAccumulator = None) -> str:
     """
     Report Writing Agent: Synthesize findings into comprehensive report
     Updated for 2026 context awareness.
@@ -343,6 +387,10 @@ async def write_report(query: str, search_results: List[Dict[str, str]]) -> str:
         messages=[{"role": "user", "content": report_prompt}],
         temperature=0.5
     )
+
+    # Track tokens
+    if tokens:
+        tokens.add(response)
 
     report = response.content[0].text
     print("✓ Report generated")
@@ -450,6 +498,9 @@ async def deep_research_with_progress(
     print(f"\n🎯 Research Query: {query}")
     print("="*70)
 
+    # Initialize token tracking
+    tokens = TokenAccumulator()
+
     # Stage 1: Planning
     stage_start = time.time()
     yield ProgressUpdate(
@@ -461,7 +512,7 @@ async def deep_research_with_progress(
         message="Generating search queries..."
     )
 
-    search_items = await plan_searches(query)
+    search_items = await plan_searches(query, tokens)
 
     yield ProgressUpdate(
         stage="planning",
@@ -491,12 +542,12 @@ async def deep_research_with_progress(
         # Execute single search
         if use_tavily:
             try:
-                summary = await search_with_tavily(item['search_term'])
+                summary = await search_with_tavily(item['search_term'], tokens)
             except Exception as e:
                 print(f"      ! Tavily failed ({e}), using LLM fallback")
-                summary = await search_with_llm_knowledge(item['search_term'])
+                summary = await search_with_llm_knowledge(item['search_term'], tokens)
         else:
-            summary = await search_with_llm_knowledge(item['search_term'])
+            summary = await search_with_llm_knowledge(item['search_term'], tokens)
 
         search_results.append({
             "search_term": item['search_term'],
@@ -524,7 +575,7 @@ async def deep_research_with_progress(
         message="Synthesizing research into report..."
     )
 
-    final_report = await write_report(query, search_results)
+    final_report = await write_report(query, search_results, tokens)
 
     yield ProgressUpdate(
         stage="writing",
@@ -532,7 +583,11 @@ async def deep_research_with_progress(
         current_step=1,
         total_steps=1,
         elapsed_time=time.time() - stage_start,
-        message="Report generated"
+        message=f"Report generated | Tokens: {tokens.total_tokens:,}",
+        input_tokens=tokens.input_tokens,
+        output_tokens=tokens.output_tokens,
+        total_tokens=tokens.total_tokens,
+        estimated_cost=tokens.estimated_cost
     )
 
     # Stage 4: Email (optional)
@@ -570,7 +625,11 @@ async def deep_research_with_progress(
         total_steps=1,
         elapsed_time=0,
         message="Research complete!",
-        report=final_report
+        report=final_report,
+        input_tokens=tokens.input_tokens,
+        output_tokens=tokens.output_tokens,
+        total_tokens=tokens.total_tokens,
+        estimated_cost=tokens.estimated_cost
     )
 
 
