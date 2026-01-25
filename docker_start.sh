@@ -67,3 +67,7 @@ fi
 echo ""
 echo "Use './docker_stop.sh' to stop the container"
 echo "View logs with: docker logs -f $CONTAINER_NAME"
+echo "Monitor:        ./docker_monitor.sh"
+echo "Verbose:        ./docker_monitor.sh --verbose"
+echo "Emergency stop: ./docker_emergency_stop.sh"
+echo "Health check:   docker inspect $CONTAINER_NAME --format='{{.State.Health.Status}}'"

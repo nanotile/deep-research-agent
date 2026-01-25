@@ -32,5 +32,9 @@ RUN mkdir -p .cache
 # Expose Gradio port
 EXPOSE 7860
 
+# Health check - marks container unhealthy after 3 failed checks
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:7860/', timeout=5)" || exit 1
+
 # Run the Research Agent Hub
 CMD ["python", "unified_app.py"]
