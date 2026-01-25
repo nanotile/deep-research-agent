@@ -17,39 +17,65 @@ Usage:
 
 import socket
 import requests
+import time
+import logging
 from typing import Optional, Dict
 import json
 import os
 
+logger = logging.getLogger(__name__)
 
-def get_vm_public_ip() -> Optional[str]:
+
+def get_vm_public_ip(max_retries: int = 3, base_delay: float = 1.0, max_delay: float = 30.0) -> Optional[str]:
     """
-    Get the public IP address of the VM using multiple methods.
+    Get the public IP address of the VM using multiple methods with exponential backoff.
+
+    Args:
+        max_retries: Maximum retry attempts per method (default: 3)
+        base_delay: Initial delay in seconds (default: 1.0)
+        max_delay: Maximum delay cap in seconds (default: 30.0)
 
     Returns:
         str: Public IP address or None if unable to determine
     """
     methods = [
         # Method 1: GCP metadata server (works on Google Cloud VMs)
-        lambda: requests.get(
+        ("GCP metadata", lambda: requests.get(
             'http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip',
             headers={'Metadata-Flavor': 'Google'},
-            timeout=2
-        ).text,
+            timeout=5
+        ).text),
 
         # Method 2: External IP services (fallback)
-        lambda: requests.get('https://api.ipify.org', timeout=2).text,
-        lambda: requests.get('https://ifconfig.me/ip', timeout=2).text,
-        lambda: requests.get('https://icanhazip.com', timeout=2).text.strip(),
+        ("ipify", lambda: requests.get('https://api.ipify.org', timeout=5).text),
+        ("ifconfig.me", lambda: requests.get('https://ifconfig.me/ip', timeout=5).text),
+        ("icanhazip", lambda: requests.get('https://icanhazip.com', timeout=5).text.strip()),
     ]
 
-    for method in methods:
-        try:
-            ip = method()
-            if ip and _is_valid_ip(ip):
-                return ip
-        except Exception:
-            continue
+    for method_name, method in methods:
+        retry_delay = base_delay
+
+        for attempt in range(max_retries):
+            try:
+                ip = method()
+                if ip and _is_valid_ip(ip):
+                    return ip
+                # Invalid IP, try next method
+                break
+            except requests.exceptions.Timeout:
+                if attempt < max_retries - 1:
+                    logger.warning(f"IP fetch timeout from {method_name}, retrying in {retry_delay:.1f}s... (attempt {attempt + 1}/{max_retries})")
+                    time.sleep(retry_delay)
+                    retry_delay = min(retry_delay * 2, max_delay)
+                # After max retries, fall through to next method
+            except requests.exceptions.RequestException as e:
+                if attempt < max_retries - 1:
+                    logger.warning(f"IP fetch failed from {method_name}: {e}, retrying in {retry_delay:.1f}s... (attempt {attempt + 1}/{max_retries})")
+                    time.sleep(retry_delay)
+                    retry_delay = min(retry_delay * 2, max_delay)
+            except Exception:
+                # Non-retryable error, try next method immediately
+                break
 
     return None
 

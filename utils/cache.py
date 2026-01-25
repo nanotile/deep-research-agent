@@ -67,10 +67,34 @@ class SQLiteCache:
         logger.info(f"SQLite cache initialized at {DB_PATH}")
 
     def _get_connection(self) -> sqlite3.Connection:
-        """Get a database connection with row factory."""
-        conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
-        conn.row_factory = sqlite3.Row
-        return conn
+        """Get a database connection with row factory and exponential backoff."""
+        retry_delay = 0.1  # Start with 100ms
+        max_delay = 60  # Cap at 60 seconds
+        max_retries = 10  # Prevent infinite loops
+        retries = 0
+
+        while retries < max_retries:
+            try:
+                conn = sqlite3.connect(
+                    str(DB_PATH),
+                    check_same_thread=False,
+                    timeout=30  # Add connection timeout
+                )
+                conn.row_factory = sqlite3.Row
+                return conn
+            except sqlite3.OperationalError as e:
+                retries += 1
+                if retries >= max_retries:
+                    logger.error(f"Database connection failed after {max_retries} retries: {e}")
+                    raise
+                logger.warning(f"Database connection failed: {e}. Retrying in {retry_delay:.1f}s... (attempt {retries}/{max_retries})")
+                time.sleep(retry_delay)
+                retry_delay = min(retry_delay * 2, max_delay)  # Exponential backoff
+            except Exception as e:
+                logger.error(f"Unexpected database error: {e}")
+                raise
+
+        raise sqlite3.OperationalError(f"Failed to connect to database after {max_retries} attempts")
 
     def _init_db(self):
         """Initialize database tables."""
