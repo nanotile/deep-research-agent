@@ -7,7 +7,7 @@ import asyncio
 import time
 from threading import Thread
 from queue import Queue
-from deep_research_agent import (
+from agents.deep_research_agent import (
     deep_research,
     deep_research_with_progress,
     ProgressUpdate,

@@ -12,12 +12,12 @@ from datetime import datetime
 from dotenv import load_dotenv
 from anthropic import AsyncAnthropic
 
-from stock_data_models import (
+from models.stock_data_models import (
     StockDataBundle, StockAnalysis, StockProgressUpdate,
     RecommendationType, ValuationAssessment, InvestmentThesis,
     SourceURL, MacroRiskAssessment, RiskLevel, GeopoliticalImpact2026,
 )
-from stock_data_fetchers import (
+from services.stock_data_fetchers import (
     validate_ticker,
     fetch_yfinance_data,
     fetch_finnhub_data,
@@ -26,7 +26,7 @@ from stock_data_fetchers import (
     fetch_tavily_news,
     fetch_macro_sentiment,
 )
-from market_context_2026 import (
+from services.market_context_2026 import (
     is_tech_semiconductor_sector,
     get_china_exposure_level,
     estimate_surcharge_eps_impact,
@@ -48,7 +48,7 @@ logger = get_logger(__name__)
 client = AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
 # Configuration - read from .env with defaults
-MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-20250514")
+DEFAULT_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-20250514")
 
 # Token tracking accumulator
 class TokenAccumulator:
@@ -242,7 +242,7 @@ async def fetch_all_stock_data(ticker: str, company_name: str) -> StockDataBundl
 # Analysis Agent
 # =============================================================================
 
-async def analyze_stock_data(ticker: str, company_name: str, data: StockDataBundle, tokens: TokenAccumulator = None) -> StockAnalysis:
+async def analyze_stock_data(ticker: str, company_name: str, data: StockDataBundle, tokens: TokenAccumulator = None, model: str = None) -> StockAnalysis:
     """
     Use Claude to analyze the aggregated data and generate investment thesis.
     Returns structured StockAnalysis via tool calling.
@@ -287,7 +287,7 @@ Provide a balanced, objective analysis. Include any relevant macro/political ris
         prompt = base_prompt
 
     response = await client.messages.create(
-        model=MODEL,
+        model=model or DEFAULT_MODEL,
         max_tokens=2048,
         system="You are a professional equity research analyst. Provide data-driven, balanced analysis. Today's date is January 2026.",
         messages=[{"role": "user", "content": prompt}],
@@ -871,10 +871,14 @@ async def write_stock_report(
 # Main Orchestrator
 # =============================================================================
 
-async def stock_research(ticker: str) -> str:
+async def stock_research(ticker: str, model: str = None) -> str:
     """
     Main orchestrator function for stock research.
     Pipeline: validate -> fetch_all -> analyze -> write_report
+
+    Args:
+        ticker: Stock ticker symbol
+        model: Claude model to use (defaults to DEFAULT_MODEL)
     """
     ticker = ticker.upper().strip()
     print(f"\n🎯 Researching: {ticker}")
@@ -895,7 +899,7 @@ async def stock_research(ticker: str) -> str:
         return f"# Error\n\nFailed to fetch data from any source.\n\nErrors:\n" + "\n".join(data.fetch_errors)
 
     # Stage 3: Analyze
-    analysis = await analyze_stock_data(ticker, company_name, data)
+    analysis = await analyze_stock_data(ticker, company_name, data, model=model)
 
     # Stage 4: Write report
     report = await write_stock_report(ticker, company_name, data, analysis)
@@ -903,10 +907,14 @@ async def stock_research(ticker: str) -> str:
     return report
 
 
-async def stock_research_with_progress(ticker: str) -> AsyncIterator[StockProgressUpdate]:
+async def stock_research_with_progress(ticker: str, model: str = None) -> AsyncIterator[StockProgressUpdate]:
     """
     Main orchestrator with progress updates for UI.
     Yields StockProgressUpdate objects as research progresses.
+
+    Args:
+        ticker: Stock ticker symbol
+        model: Claude model to use (defaults to DEFAULT_MODEL)
     """
     ticker = ticker.upper().strip()
     start_time = time.time()
@@ -1015,7 +1023,7 @@ async def stock_research_with_progress(ticker: str) -> AsyncIterator[StockProgre
         message="Analyzing data with Claude..."
     )
 
-    analysis = await analyze_stock_data(ticker, company_name, data, tokens)
+    analysis = await analyze_stock_data(ticker, company_name, data, tokens, model=model)
 
     yield StockProgressUpdate(
         stage="analyzing",

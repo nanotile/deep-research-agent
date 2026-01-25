@@ -17,8 +17,10 @@ from anthropic import Anthropic
 import yfinance as yf
 
 # Import shared utilities
-from stock_data_fetchers import fetch_finnhub_data, fetch_tavily_news
-from utils import get_logger, sanitize_ticker, retry_with_backoff
+from services.stock_data_fetchers import fetch_finnhub_data, fetch_tavily_news
+from utils.logging_config import get_logger
+from utils.validators import sanitize_ticker
+from utils.retry_handler import retry_with_backoff
 
 logger = get_logger(__name__)
 

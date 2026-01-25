@@ -17,7 +17,8 @@ from enum import Enum
 import yfinance as yf
 
 from utils.cache import db_cache
-from utils import get_logger, sanitize_ticker
+from utils.logging_config import get_logger
+from utils.validators import sanitize_ticker
 
 logger = get_logger(__name__)
 

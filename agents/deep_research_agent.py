@@ -19,7 +19,7 @@ from anthropic import AsyncAnthropic
 from pydantic import BaseModel, Field
 import resend
 
-from market_context_2026 import DEEP_RESEARCH_2026_CONTEXT
+from services.market_context_2026 import DEEP_RESEARCH_2026_CONTEXT
 from utils.logging_config import setup_logging, get_logger
 from utils.token_tracker import extract_usage_from_response, format_token_display
 
@@ -80,7 +80,7 @@ class ProgressUpdate:
 
 # Configuration - read from .env with defaults
 HOW_MANY_SEARCHES = int(os.getenv("HOW_MANY_SEARCHES", "3"))
-MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-20250514")
+DEFAULT_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-20250514")
 
 # Token tracking accumulator
 class TokenAccumulator:
@@ -138,7 +138,7 @@ SEARCH_PLAN_TOOL = {
     }
 }
 
-async def plan_searches(query: str, tokens: TokenAccumulator = None) -> List[Dict[str, str]]:
+async def plan_searches(query: str, tokens: TokenAccumulator = None, model: str = None) -> List[Dict[str, str]]:
     """
     Planning Agent: Generate search queries based on the research topic
     Updated for 2026 context awareness.
@@ -172,7 +172,7 @@ async def plan_searches(query: str, tokens: TokenAccumulator = None) -> List[Dic
     Use the create_search_plan tool to provide your response."""
 
     response = await client.messages.create(
-        model=MODEL,
+        model=model or DEFAULT_MODEL,
         max_tokens=1024,
         system="You are a research planning expert. Today's date is January 2026. Always use the provided tool to structure your response.",
         messages=[{"role": "user", "content": prompt}],
@@ -200,7 +200,7 @@ async def plan_searches(query: str, tokens: TokenAccumulator = None) -> List[Dic
 
     return search_items
 
-async def search_with_tavily(search_term: str, tokens: TokenAccumulator = None) -> str:
+async def search_with_tavily(search_term: str, tokens: TokenAccumulator = None, model: str = None) -> str:
     """
     Execute a Tavily web search and synthesize results with Claude.
     Returns a summary string compatible with the existing pipeline.
@@ -238,7 +238,7 @@ Write only the summary, synthesizing information from all sources.
 Be specific and factual. Do not include URLs or source citations."""
 
     response = await client.messages.create(
-        model=MODEL,
+        model=model or DEFAULT_MODEL,
         max_tokens=1024,
         system="You are an expert researcher synthesizing web search results into concise summaries.",
         messages=[{"role": "user", "content": synthesis_prompt}],
@@ -264,7 +264,7 @@ def _is_tech_ai_query(query: str) -> bool:
     return any(keyword in query_lower for keyword in tech_keywords)
 
 
-async def search_with_llm_knowledge(search_term: str, tokens: TokenAccumulator = None) -> str:
+async def search_with_llm_knowledge(search_term: str, tokens: TokenAccumulator = None, model: str = None) -> str:
     """
     Fallback: Use LLM's knowledge base for research when Tavily is unavailable.
     Updated for January 2026 knowledge context.
@@ -289,7 +289,7 @@ Be specific, factual, and cite approximate timeframes when relevant.
 Write only the summary, no additional commentary."""
 
     response = await client.messages.create(
-        model=MODEL,
+        model=model or DEFAULT_MODEL,
         max_tokens=1024,
         system="You are an expert researcher with deep knowledge across many domains. Your knowledge extends to January 2026. When discussing tech, AI, or semiconductors, consider the 2026 market context including BIS export controls, 2nm process node competition, and Agentic AI adoption trends.",
         messages=[{"role": "user", "content": research_prompt}],
@@ -303,7 +303,7 @@ Write only the summary, no additional commentary."""
     return response.content[0].text
 
 
-async def execute_searches(search_items: List[Dict[str, str]]) -> List[Dict[str, str]]:
+async def execute_searches(search_items: List[Dict[str, str]], tokens: TokenAccumulator = None, model: str = None) -> List[Dict[str, str]]:
     """
     Search Agent: Execute web searches using Tavily API, with LLM fallback
     """
@@ -321,12 +321,12 @@ async def execute_searches(search_items: List[Dict[str, str]]) -> List[Dict[str,
 
         if use_tavily:
             try:
-                summary = await search_with_tavily(item['search_term'])
+                summary = await search_with_tavily(item['search_term'], tokens=tokens, model=model)
             except Exception as e:
                 print(f"      ! Tavily failed ({e}), using LLM fallback")
-                summary = await search_with_llm_knowledge(item['search_term'])
+                summary = await search_with_llm_knowledge(item['search_term'], tokens=tokens, model=model)
         else:
-            summary = await search_with_llm_knowledge(item['search_term'])
+            summary = await search_with_llm_knowledge(item['search_term'], tokens=tokens, model=model)
 
         search_results.append({
             "search_term": item['search_term'],
@@ -337,7 +337,7 @@ async def execute_searches(search_items: List[Dict[str, str]]) -> List[Dict[str,
 
     return search_results
 
-async def write_report(query: str, search_results: List[Dict[str, str]], tokens: TokenAccumulator = None) -> str:
+async def write_report(query: str, search_results: List[Dict[str, str]], tokens: TokenAccumulator = None, model: str = None) -> str:
     """
     Report Writing Agent: Synthesize findings into comprehensive report
     Updated for 2026 context awareness.
@@ -381,7 +381,7 @@ async def write_report(query: str, search_results: List[Dict[str, str]], tokens:
     Be thorough, professional, and insightful."""
 
     response = await client.messages.create(
-        model=MODEL,
+        model=model or DEFAULT_MODEL,
         max_tokens=4096,
         system="You are an expert research report writer. Today's date is January 2026.",
         messages=[{"role": "user", "content": report_prompt}],
@@ -413,7 +413,7 @@ async def send_email_report(recipient: str, subject: str, report: str) -> str:
     Provide only the complete HTML code."""
 
     response = await client.messages.create(
-        model=MODEL,
+        model=DEFAULT_MODEL,  # Use default for email formatting
         max_tokens=4096,
         system="You are an HTML email formatting expert.",
         messages=[{"role": "user", "content": html_prompt}],
@@ -442,7 +442,8 @@ async def send_email_report(recipient: str, subject: str, report: str) -> str:
 async def deep_research(
     query: str,
     send_via_email: bool = False,
-    recipient: str = None
+    recipient: str = None,
+    model: str = None
 ) -> str:
     """
     Main Orchestrator: Coordinate all agents to perform deep research
@@ -451,6 +452,7 @@ async def deep_research(
         query: Research question or topic
         send_via_email: Whether to email the report
         recipient: Email address (required if send_via_email=True)
+        model: Claude model to use (defaults to DEFAULT_MODEL)
 
     Returns:
         Final research report as markdown string
@@ -459,13 +461,13 @@ async def deep_research(
     print("="*70)
 
     # Stage 1: Planning
-    search_items = await plan_searches(query)
+    search_items = await plan_searches(query, model=model)
 
     # Stage 2: Execute Searches
-    search_results = await execute_searches(search_items)
+    search_results = await execute_searches(search_items, model=model)
 
     # Stage 3: Write Report
-    final_report = await write_report(query, search_results)
+    final_report = await write_report(query, search_results, model=model)
 
     # Stage 4: Email (optional)
     if send_via_email and recipient:
@@ -481,7 +483,8 @@ async def deep_research(
 async def deep_research_with_progress(
     query: str,
     send_via_email: bool = False,
-    recipient: str = None
+    recipient: str = None,
+    model: str = None
 ) -> AsyncIterator[ProgressUpdate]:
     """
     Main Orchestrator with progress updates.
@@ -491,6 +494,7 @@ async def deep_research_with_progress(
         query: Research question or topic
         send_via_email: Whether to email the report
         recipient: Email address (required if send_via_email=True)
+        model: Claude model to use (defaults to DEFAULT_MODEL)
 
     Yields:
         ProgressUpdate objects tracking each stage
@@ -512,7 +516,7 @@ async def deep_research_with_progress(
         message="Generating search queries..."
     )
 
-    search_items = await plan_searches(query, tokens)
+    search_items = await plan_searches(query, tokens, model=model)
 
     yield ProgressUpdate(
         stage="planning",
@@ -542,12 +546,12 @@ async def deep_research_with_progress(
         # Execute single search
         if use_tavily:
             try:
-                summary = await search_with_tavily(item['search_term'], tokens)
+                summary = await search_with_tavily(item['search_term'], tokens, model=model)
             except Exception as e:
                 print(f"      ! Tavily failed ({e}), using LLM fallback")
-                summary = await search_with_llm_knowledge(item['search_term'], tokens)
+                summary = await search_with_llm_knowledge(item['search_term'], tokens, model=model)
         else:
-            summary = await search_with_llm_knowledge(item['search_term'], tokens)
+            summary = await search_with_llm_knowledge(item['search_term'], tokens, model=model)
 
         search_results.append({
             "search_term": item['search_term'],
@@ -575,7 +579,7 @@ async def deep_research_with_progress(
         message="Synthesizing research into report..."
     )
 
-    final_report = await write_report(query, search_results, tokens)
+    final_report = await write_report(query, search_results, tokens, model=model)
 
     yield ProgressUpdate(
         stage="writing",

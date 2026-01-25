@@ -14,38 +14,38 @@ from queue import Queue
 from dotenv import load_dotenv
 
 # Import Deep Research components
-from deep_research_agent import (
+from agents.deep_research_agent import (
     deep_research_with_progress,
     ProgressUpdate,
     tavily_client
 )
 
 # Import Stock Research components
-from stock_research_agent import stock_research_with_progress
-from stock_data_models import StockProgressUpdate
+from agents.stock_research_agent import stock_research_with_progress
+from models.stock_data_models import StockProgressUpdate
 
 # Import new Phase 3 agents
-from sector_research_agent import (
+from agents.sector_research_agent import (
     sector_research_with_progress,
     get_available_sectors,
     get_sector_info,
     SectorProgressUpdate,
 )
-from competitor_agent import (
+from agents.competitor_agent import (
     competitor_analysis_with_progress,
     CompetitorProgressUpdate,
 )
-from portfolio_agent import (
+from agents.portfolio_agent import (
     portfolio_analysis_with_progress,
     PortfolioProgressUpdate,
 )
 
 # Import Phase 4 agents
-from earnings_agent import (
+from agents.earnings_agent import (
     earnings_calendar_with_progress,
     EarningsProgressUpdate,
 )
-from alert_system import (
+from agents.alert_system import (
     create_price_alert,
     create_earnings_alert,
     get_alert_summary,

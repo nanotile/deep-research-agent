@@ -13,9 +13,9 @@ from dataclasses import dataclass
 from dotenv import load_dotenv
 from anthropic import AsyncAnthropic
 
-from stock_data_fetchers import fetch_yfinance_data, validate_ticker
-from stock_data_models import YFinanceData
-from market_context_2026 import GLOBAL_MARKET_CONTEXT_2026
+from services.stock_data_fetchers import fetch_yfinance_data, validate_ticker
+from models.stock_data_models import YFinanceData
+from services.market_context_2026 import GLOBAL_MARKET_CONTEXT_2026
 from utils.logging_config import get_logger
 
 # Load environment variables
@@ -27,7 +27,7 @@ logger = get_logger(__name__)
 client = AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
 # Configuration
-MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-20250514")
+DEFAULT_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-20250514")
 
 logger.info("=" * 70)
 logger.info("SECTOR RESEARCH AGENT")
@@ -334,7 +334,7 @@ def _format_sector_data_for_analysis(sector_data: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-async def generate_sector_report(sector_data: Dict[str, Any], tokens: TokenAccumulator = None) -> str:
+async def generate_sector_report(sector_data: Dict[str, Any], tokens: TokenAccumulator = None, model: str = None) -> str:
     """
     Use Claude to generate a comprehensive sector analysis report.
     """
@@ -367,7 +367,7 @@ Here is the data:
 Please provide a thorough analysis covering all major aspects of this sector."""
 
     response = await client.messages.create(
-        model=MODEL,
+        model=model or DEFAULT_MODEL,
         max_tokens=8000,
         system=system_prompt,
         messages=[{"role": "user", "content": user_prompt}]
@@ -404,7 +404,7 @@ async def sector_research(sector: str) -> str:
     return report
 
 
-async def sector_research_with_progress(sector: str) -> AsyncIterator[SectorProgressUpdate]:
+async def sector_research_with_progress(sector: str, model: str = None) -> AsyncIterator[SectorProgressUpdate]:
     """
     Async generator that yields progress updates during sector research.
     """
@@ -518,7 +518,7 @@ async def sector_research_with_progress(sector: str) -> AsyncIterator[SectorProg
 
     # Generate report with token tracking
     tokens = TokenAccumulator()
-    report = await generate_sector_report(sector_data, tokens)
+    report = await generate_sector_report(sector_data, tokens, model=model)
 
     yield SectorProgressUpdate(
         stage="writing",

@@ -7,8 +7,8 @@ import asyncio
 import time
 from threading import Thread
 from queue import Queue
-from stock_research_agent import stock_research_with_progress
-from stock_data_models import StockProgressUpdate
+from agents.stock_research_agent import stock_research_with_progress
+from models.stock_data_models import StockProgressUpdate
 
 
 def format_progress_display(update: StockProgressUpdate, total_elapsed: float) -> str:

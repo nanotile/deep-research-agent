@@ -13,9 +13,9 @@ from dataclasses import dataclass
 from dotenv import load_dotenv
 from anthropic import AsyncAnthropic
 
-from stock_data_fetchers import fetch_yfinance_data, validate_ticker
-from stock_data_models import YFinanceData
-from market_context_2026 import GLOBAL_MARKET_CONTEXT_2026
+from services.stock_data_fetchers import fetch_yfinance_data, validate_ticker
+from models.stock_data_models import YFinanceData
+from services.market_context_2026 import GLOBAL_MARKET_CONTEXT_2026
 from utils.logging_config import get_logger
 
 # Load environment variables
@@ -27,7 +27,7 @@ logger = get_logger(__name__)
 client = AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
 # Configuration
-MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-20250514")
+DEFAULT_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-20250514")
 
 logger.info("=" * 70)
 logger.info("COMPETITOR INTELLIGENCE AGENT")
@@ -423,7 +423,8 @@ async def competitor_analysis(ticker: str, max_competitors: int = 5) -> str:
 
 async def competitor_analysis_with_progress(
     ticker: str,
-    max_competitors: int = 5
+    max_competitors: int = 5,
+    model: str = None
 ) -> AsyncIterator[CompetitorProgressUpdate]:
     """
     Async generator that yields progress updates during competitor analysis.
@@ -489,7 +490,7 @@ async def competitor_analysis_with_progress(
 
     # Generate report with token tracking
     tokens = TokenAccumulator()
-    report = await generate_competitor_report(comp_data, tokens)
+    report = await generate_competitor_report(comp_data, tokens, model=model)
 
     yield CompetitorProgressUpdate(
         stage="writing",

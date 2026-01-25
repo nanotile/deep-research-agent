@@ -15,9 +15,9 @@ from dataclasses import dataclass, field
 from dotenv import load_dotenv
 from anthropic import AsyncAnthropic
 
-from stock_data_fetchers import fetch_yfinance_data, validate_ticker
-from stock_data_models import YFinanceData
-from market_context_2026 import GLOBAL_MARKET_CONTEXT_2026
+from services.stock_data_fetchers import fetch_yfinance_data, validate_ticker
+from models.stock_data_models import YFinanceData
+from services.market_context_2026 import GLOBAL_MARKET_CONTEXT_2026
 from utils.logging_config import get_logger
 from utils.validators import sanitize_ticker
 

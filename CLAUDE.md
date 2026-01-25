@@ -6,6 +6,45 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Deep Research Agent is a multi-agent AI system that automates research and report generation using Anthropic's Claude API. The system supports real-time web search via Tavily API (with LLM knowledge fallback) and provides live progress tracking in the web UI. Includes a specialized Stock Research Agent for financial analysis.
 
+## Directory Structure
+
+```
+deep-research-agent/
+├── agents/                         # Research agents
+│   ├── deep_research_agent.py      # General research agent
+│   ├── stock_research_agent.py     # Stock analysis agent
+│   ├── competitor_agent.py         # Competitor intelligence
+│   ├── sector_research_agent.py    # Sector-wide analysis
+│   ├── portfolio_agent.py          # Portfolio analysis
+│   ├── earnings_agent.py           # Earnings calendar
+│   └── alert_system.py             # Price/earnings alerts
+│
+├── models/                         # Data models
+│   └── stock_data_models.py        # Pydantic models for stock data
+│
+├── services/                       # Data fetchers & context
+│   ├── stock_data_fetchers.py      # Financial data APIs
+│   └── market_context_2026.py      # 2026 market context
+│
+├── utils/                          # Utility modules
+│   ├── cache.py                    # Database & memory caching
+│   ├── logging_config.py           # Logging setup
+│   ├── pdf_export.py               # PDF report generation
+│   ├── rate_limiter.py             # API rate limiting
+│   ├── report_history.py           # Report storage
+│   ├── retry_handler.py            # Retry with backoff
+│   ├── token_tracker.py            # Token usage tracking
+│   └── validators.py               # Input validation
+│
+├── docs/                           # Documentation
+│
+├── unified_app.py                  # Main web hub (entry point)
+├── app.py                          # Deep research UI
+├── stock_app.py                    # Stock research UI
+├── Dockerfile                      # Docker configuration
+└── requirements.txt                # Python dependencies
+```
+
 ## Core Commands
 
 ```bash
@@ -13,13 +52,15 @@ Deep Research Agent is a multi-agent AI system that automates research and repor
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 
 # Web Interface (Gradio UI) - opens at http://127.0.0.1:7860
-python app.py
+python unified_app.py     # Full hub with all agents
+python app.py             # Deep research only
+python stock_app.py       # Stock research only
 
 # CLI Interface - general research
-python deep_research_agent.py
+python -m agents.deep_research_agent
 
 # CLI Interface - stock analysis
-python stock_research_agent.py
+python -m agents.stock_research_agent
 
 # Test Resend email API
 python test_email.py
@@ -44,7 +85,7 @@ docker run -p 7860:7860 --env-file .env deep-research-agent
 
 ## Architecture
 
-### Deep Research Agent Pipeline (`deep_research_agent.py`)
+### Deep Research Agent Pipeline (`agents/deep_research_agent.py`)
 
 Four agents execute sequentially via `deep_research()`:
 
@@ -54,22 +95,16 @@ User Query → plan_searches() → execute_searches() → write_report() → [se
            WebSearchPlan        List[summaries]      Markdown report    Email via Resend
 ```
 
-1. **Planning Agent** (`plan_searches`:97): Uses tool calling with `SEARCH_PLAN_TOOL` to generate structured search queries
-2. **Research Agent** (`execute_searches`:216): Searches via Tavily API or falls back to LLM knowledge
-3. **Report Agent** (`write_report`:250): Synthesizes findings into structured markdown report
-4. **Email Agent** (`send_email_report`:294): Converts markdown to HTML and sends via Resend API
+1. **Planning Agent** (`plan_searches`): Uses tool calling with `SEARCH_PLAN_TOOL` to generate structured search queries
+2. **Research Agent** (`execute_searches`): Searches via Tavily API or falls back to LLM knowledge
+3. **Report Agent** (`write_report`): Synthesizes findings into structured markdown report
+4. **Email Agent** (`send_email_report`): Converts markdown to HTML and sends via Resend API
 
 **Main orchestrators:**
-- `deep_research()`:337 - Simple async function returning final report
-- `deep_research_with_progress()`:376 - Async generator yielding `ProgressUpdate` objects for UI streaming
+- `deep_research()` - Simple async function returning final report
+- `deep_research_with_progress()` - Async generator yielding `ProgressUpdate` objects for UI streaming
 
-**Key configuration** (lines 63-65):
-```python
-HOW_MANY_SEARCHES = 3  # Number of search queries to generate
-MODEL = "claude-sonnet-4-20250514"  # or "claude-opus-4-20250514" for better quality
-```
-
-### Stock Research Agent (`stock_research_agent.py`)
+### Stock Research Agent (`agents/stock_research_agent.py`)
 
 Specialized agent for stock analysis using multiple financial data sources:
 
@@ -79,18 +114,18 @@ Ticker → validate_ticker() → fetch_all_stock_data() → analyze_stock_data()
          Validation           StockDataBundle          StockAnalysis          Investment Thesis
 ```
 
-**Data sources** (`stock_data_fetchers.py`):
-- `fetch_yfinance_data()`:26 - Price, fundamentals, financials
-- `fetch_finnhub_data()`:133 - News, sentiment, analyst ratings, insider transactions
-- `fetch_sec_edgar_filings()`:291 - SEC filings (10-K, 10-Q, 8-K)
-- `fetch_alpha_vantage_data()`:438 - Financial statements, company overview
-- `fetch_tavily_news()`:580 - Real-time news via Tavily
+**Data sources** (`services/stock_data_fetchers.py`):
+- `fetch_yfinance_data()` - Price, fundamentals, financials
+- `fetch_finnhub_data()` - News, sentiment, analyst ratings, insider transactions
+- `fetch_sec_edgar_filings()` - SEC filings (10-K, 10-Q, 8-K)
+- `fetch_alpha_vantage_data()` - Financial statements, company overview
+- `fetch_tavily_news()` - Real-time news via Tavily
 
 **Key functions:**
-- `stock_research()`:563 - Main entry point for stock analysis
-- `stock_research_with_progress()`:595 - Async generator for UI streaming
+- `stock_research()` - Main entry point for stock analysis
+- `stock_research_with_progress()` - Async generator for UI streaming
 
-### Web Interface (`app.py`)
+### Web Interface (`unified_app.py`)
 
 - Gradio Blocks UI with live progress indicators
 - Uses background thread + queue pattern for async-to-sync bridge
@@ -99,8 +134,8 @@ Ticker → validate_ticker() → fetch_all_stock_data() → analyze_stock_data()
 ### Structured Output
 
 Both agents use Pydantic models with Anthropic tool calling for type-safe output:
-- **Deep Research**: `WebSearchItem`, `WebSearchPlan` (lines 43-50)
-- **Stock Research**: `StockAnalysis`, `InvestmentThesis` (`stock_data_models.py`)
+- **Deep Research**: `WebSearchItem`, `WebSearchPlan` (`agents/deep_research_agent.py`)
+- **Stock Research**: `StockAnalysis`, `InvestmentThesis` (`models/stock_data_models.py`)
 
 ## API Dependencies
 
@@ -132,8 +167,8 @@ demo.launch(**configure_gradio_server(port=7860))
 ## Python API
 
 ```python
-from deep_research_agent import deep_research, deep_research_with_progress
-from stock_research_agent import stock_research, stock_research_with_progress
+from agents.deep_research_agent import deep_research, deep_research_with_progress
+from agents.stock_research_agent import stock_research, stock_research_with_progress
 import asyncio
 
 # General research
