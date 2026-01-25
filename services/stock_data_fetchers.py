@@ -88,7 +88,7 @@ async def _http_get_with_retry(
     raise httpx.RequestError(f"Failed after {max_retries + 1} attempts")
 
 
-from stock_data_models import (
+from models.stock_data_models import (
     SourceURL,
     FinnhubData, NewsArticle, AnalystRecommendation, InsiderTransaction,
     AlphaVantageData, CompanyOverview, FinancialStatement, TechnicalIndicators,
@@ -97,7 +97,7 @@ from stock_data_models import (
     TavilyNewsData, TavilyArticle,
     MacroSentimentData, PoliticalNewsItem,
 )
-from market_context_2026 import (
+from services.market_context_2026 import (
     is_tech_semiconductor_sector,
     get_2026_search_queries,
     filter_searches_for_2026,
