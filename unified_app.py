@@ -55,6 +55,16 @@ from agents.alert_system import (
     AlertType,
 )
 
+# Import AI Research Agent
+from agents.ai_research_agent import (
+    ai_research_with_progress,
+    AIResearchProgressUpdate,
+)
+from models.ai_research_models import AIResearchProgressUpdate as AIProgressModel
+
+# Import Google Drive service
+from services.google_drive_service import save_report_to_drive, is_drive_configured
+
 # Import utilities
 from utils.validators import sanitize_ticker, sanitize_query
 from utils.rate_limiter import RateLimiter
@@ -107,6 +117,8 @@ def format_research_progress(update: ProgressUpdate, total_elapsed: float) -> st
     stage_icons = {
         "planning": "🤔",
         "searching": "🔍",
+        "extracting": "🧠",
+        "recursing": "🔄",
         "writing": "📝",
         "emailing": "📧",
         "complete": "✅"
@@ -134,6 +146,14 @@ def format_research_progress(update: ProgressUpdate, total_elapsed: float) -> st
     if stage_time:
         lines.append(f"**Stage time:** {stage_time}")
 
+    # Add depth tracking if depth > 1
+    if update.max_depth > 1:
+        lines.append(f"\n**Depth:** {update.current_depth}/{update.max_depth}")
+        if update.total_searches > 0:
+            lines.append(f"**Total Searches:** {update.total_searches}")
+        if update.learnings_count > 0:
+            lines.append(f"**Learnings:** {update.learnings_count}")
+
     lines.append(f"\n---\n**Total elapsed:** {total_elapsed:.1f}s")
 
     # Add token usage if available
@@ -144,7 +164,7 @@ def format_research_progress(update: ProgressUpdate, total_elapsed: float) -> st
     return "\n".join(lines)
 
 
-def run_research_with_progress(query: str, request: gr.Request = None):
+def run_research_with_progress(query: str, depth: int = 1, max_searches: int = 6, request: gr.Request = None):
     """Generator function that yields progress updates and final report for Deep Research."""
     # Input validation
     if not query or query.strip() == "":
@@ -165,13 +185,17 @@ def run_research_with_progress(query: str, request: gr.Request = None):
         yield f"### ⚠️ Rate Limit Exceeded\n\n{rate_error}\n\nRemaining requests: {remaining}", "*Please wait before making another request...*"
         return
 
-    logger.info(f"Starting deep research for query: {sanitized_query[:50]}...")
+    # Convert slider values to integers
+    depth = int(depth)
+    max_searches = int(max_searches)
+
+    logger.info(f"Starting deep research for query: {sanitized_query[:50]}... (depth={depth}, max_searches={max_searches})")
 
     progress_queue = Queue()
 
     def run_async_research():
         async def async_wrapper():
-            async for update in deep_research_with_progress(query=sanitized_query):
+            async for update in deep_research_with_progress(query=sanitized_query, depth=depth, max_searches=max_searches):
                 progress_queue.put(update)
 
         loop = asyncio.new_event_loop()
@@ -329,6 +353,8 @@ def format_stock_progress(update: StockProgressUpdate, total_elapsed: float) -> 
         "validating": "🔍",
         "fetching": "📡",
         "analyzing": "🧠",
+        "identifying_gaps": "🔎",
+        "followup_research": "🔬",
         "writing": "📝",
         "complete": "✅",
         "error": "❌"
@@ -357,7 +383,7 @@ def format_stock_progress(update: StockProgressUpdate, total_elapsed: float) -> 
     return "\n".join(lines)
 
 
-def run_stock_research(ticker: str, request: gr.Request = None):
+def run_stock_research(ticker: str, deep_analysis: bool = False, request: gr.Request = None):
     """Generator function that yields progress updates and final report for Stock Research."""
     # Input validation
     if not ticker or ticker.strip() == "":
@@ -387,13 +413,13 @@ def run_stock_research(ticker: str, request: gr.Request = None):
         )
         return
 
-    logger.info(f"Starting stock research for ticker: {sanitized_ticker}")
+    logger.info(f"Starting stock research for ticker: {sanitized_ticker} (deep_analysis={deep_analysis})")
 
     progress_queue = Queue()
 
     def run_async_research():
         async def async_wrapper():
-            async for update in stock_research_with_progress(sanitized_ticker):
+            async for update in stock_research_with_progress(sanitized_ticker, deep_analysis=deep_analysis):
                 progress_queue.put(update)
 
         loop = asyncio.new_event_loop()
@@ -986,6 +1012,158 @@ def run_portfolio_csv_analysis(file, request: gr.Request = None):
 
 
 # ============================================================
+# AI Research Helper Functions
+# ============================================================
+
+def format_ai_research_progress(update: AIResearchProgressUpdate, total_elapsed: float) -> str:
+    """Format progress update for AI Research display"""
+    stage_icons = {
+        "planning": "🤔",
+        "searching": "🔍",
+        "extracting": "🧠",
+        "recursing": "🔄",
+        "synthesizing": "📝",
+        "complete": "✅"
+    }
+
+    icon = stage_icons.get(update.stage, "⏳")
+
+    lines = [
+        f"### {icon} {update.stage_display}",
+        f"**Status:** {update.message}",
+    ]
+
+    # Depth progress
+    if update.max_depth > 0:
+        depth_filled = "●" * (update.current_depth + 1)
+        depth_empty = "○" * (update.max_depth - update.current_depth - 1)
+        lines.append(f"**Depth:** [{depth_filled}{depth_empty}] {update.current_depth + 1}/{update.max_depth}")
+
+    # Search progress
+    if update.total_searches > 0:
+        search_pct = min(100, (update.searches_completed / update.total_searches) * 100)
+        lines.append(f"**Searches:** {update.searches_completed}/{update.total_searches} ({search_pct:.0f}%)")
+
+    # Learnings count
+    if update.learnings_count > 0:
+        lines.append(f"**Learnings:** {update.learnings_count}")
+
+    if update.elapsed_time > 0:
+        lines.append(f"\n**Elapsed:** {update.elapsed_time:.1f}s")
+
+    lines.append(f"\n---\n**Total elapsed:** {total_elapsed:.1f}s")
+
+    return "\n".join(lines)
+
+
+def run_ai_research(query: str, depth: int, max_searches: int, request: gr.Request = None):
+    """Generator function that yields progress updates and final report for AI Research."""
+    # Input validation
+    if not query or query.strip() == "":
+        yield (
+            "### ⚠️ Input Required\n\nPlease enter a research query!",
+            "*Your AI research report will appear here...*"
+        )
+        return
+
+    # Sanitize the query
+    sanitized_query, is_valid, error_msg = sanitize_query(query)
+    if not is_valid:
+        yield (
+            f"### ⚠️ Invalid Input\n\n{error_msg}",
+            "*Your AI research report will appear here...*"
+        )
+        return
+
+    # Rate limiting
+    session_id = get_session_id(request)
+    is_allowed, rate_error = research_limiter.is_allowed(session_id)
+    if not is_allowed:
+        remaining = research_limiter.get_remaining(session_id)
+        yield (
+            f"### ⚠️ Rate Limit Exceeded\n\n{rate_error}\n\nRemaining requests: {remaining}",
+            "*Please wait before making another request...*"
+        )
+        return
+
+    logger.info(f"Starting AI research for query: {sanitized_query[:50]}...")
+
+    progress_queue = Queue()
+
+    def run_async_research():
+        async def async_wrapper():
+            async for update in ai_research_with_progress(
+                query=sanitized_query,
+                depth=depth,
+                max_searches=max_searches
+            ):
+                progress_queue.put(update)
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(async_wrapper())
+        except Exception as e:
+            progress_queue.put(Exception(str(e)))
+        finally:
+            loop.close()
+
+    thread = Thread(target=run_async_research)
+    thread.start()
+
+    start_time = time.time()
+    report = "*AI research in progress...*"
+    last_message = "Initializing..."
+    last_stage = "Starting"
+
+    yield (
+        "### ⏳ Starting...\n\nInitializing AI research agents...",
+        report
+    )
+
+    while thread.is_alive() or not progress_queue.empty():
+        try:
+            update = progress_queue.get(timeout=1.0)
+
+            if isinstance(update, Exception):
+                total_time = time.time() - start_time
+                error_status = f"### ❌ Error\n\nAn error occurred: {update}\n\n**Time:** {total_time:.1f}s"
+                yield (
+                    error_status,
+                    f"❌ **Error occurred:**\n\n```\n{update}\n```\n\nPlease check your API keys in the .env file."
+                )
+                break
+
+            total_elapsed = time.time() - start_time
+            last_message = update.message
+            last_stage = update.stage_display
+
+            if update.stage == "complete":
+                status = f"### ✅ Complete!\n\n**Total time:** {total_elapsed:.1f}s"
+                status += f"\n\n**Depth:** {update.current_depth + 1}/{update.max_depth}"
+                status += f"\n**Searches:** {update.searches_completed}"
+                status += f"\n**Learnings:** {update.learnings_count}"
+                # Add token usage
+                if update.total_tokens > 0:
+                    status += f"\n\n📊 **Token Usage:** {update.total_tokens:,} tokens (${update.estimated_cost:.4f})"
+                    status += f"\n   - Input: {update.input_tokens:,} | Output: {update.output_tokens:,}"
+                yield status, update.report
+                break
+            else:
+                status = format_ai_research_progress(update, total_elapsed)
+                yield status, report
+
+        except:
+            # Timeout - update elapsed time to show we're still working
+            if thread.is_alive():
+                total_elapsed = time.time() - start_time
+                status = f"### ⏳ {last_stage}\n\n{last_message}\n\n**Elapsed:** {total_elapsed:.1f}s ⟳"
+                yield status, report
+
+    thread.join()
+
+
+# ============================================================
 # Earnings Calendar Helper Functions
 # ============================================================
 
@@ -1265,6 +1443,24 @@ with gr.Blocks(title="Research Agent Hub", theme=gr.themes.Soft()) as demo:
                     )
 
                     with gr.Row():
+                        research_depth_slider = gr.Slider(
+                            minimum=1,
+                            maximum=3,
+                            value=1,
+                            step=1,
+                            label="Research Depth",
+                            info="1=Quick (default), 2=Standard with follow-ups, 3=Comprehensive"
+                        )
+                        research_max_searches = gr.Slider(
+                            minimum=3,
+                            maximum=15,
+                            value=6,
+                            step=3,
+                            label="Max Searches",
+                            info="Total searches across all depths"
+                        )
+
+                    with gr.Row():
                         research_submit_btn = gr.Button("🚀 Start Research", variant="primary", scale=2)
                         research_clear_btn = gr.Button("🗑️ Clear", scale=1)
 
@@ -1297,13 +1493,13 @@ with gr.Blocks(title="Research Agent Hub", theme=gr.themes.Soft()) as demo:
             # Deep Research button actions
             research_submit_btn.click(
                 fn=run_research_with_progress,
-                inputs=[query_input],
+                inputs=[query_input, research_depth_slider, research_max_searches],
                 outputs=[research_status, research_output]
             )
 
             research_clear_btn.click(
-                lambda: ("", "### ⏳ Ready\n\nEnter a query and click **Start Research**", "*Your research report will appear here...*"),
-                outputs=[query_input, research_status, research_output]
+                lambda: ("", 1, 6, "### ⏳ Ready\n\nEnter a query and click **Start Research**", "*Your research report will appear here...*"),
+                outputs=[query_input, research_depth_slider, research_max_searches, research_status, research_output]
             )
 
             # Copy to clipboard (uses JavaScript)
@@ -1345,6 +1541,140 @@ with gr.Blocks(title="Research Agent Hub", theme=gr.themes.Soft()) as demo:
                 - "Remote work productivity tools comparison"
                 """)
 
+        # ========== AI Research Tab ==========
+        with gr.Tab("🤖 AI Research"):
+            gr.Markdown("""
+            ### Specialized AI Information Research Agent
+
+            This advanced research agent is optimized for AI/ML topics with:
+            - **Recursive Research** - Follows up on gaps and unanswered questions
+            - **Domain Prioritization** - Favors authoritative sources (arXiv, AI labs, etc.)
+            - **Inline Citations** - References with [N] markers and source tiers
+            - **Parallel Execution** - Faster searches with concurrency control
+
+            Ideal for: AI capabilities, model comparisons, enterprise AI, policy/governance, technical deep-dives.
+            """)
+
+            with gr.Row():
+                with gr.Column(scale=2):
+                    ai_query_input = gr.Textbox(
+                        label="🎯 Research Query",
+                        placeholder="e.g., Latest advances in reasoning models and their enterprise applications",
+                        lines=2
+                    )
+
+                    with gr.Row():
+                        ai_depth_slider = gr.Slider(
+                            minimum=1,
+                            maximum=3,
+                            value=2,
+                            step=1,
+                            label="Research Depth",
+                            info="1=Quick, 2=Standard, 3=Comprehensive"
+                        )
+                        ai_max_searches = gr.Slider(
+                            minimum=5,
+                            maximum=30,
+                            value=15,
+                            step=5,
+                            label="Max Searches",
+                            info="Higher = more thorough but slower"
+                        )
+
+                    with gr.Row():
+                        ai_submit_btn = gr.Button("🚀 Start AI Research", variant="primary", scale=2)
+                        ai_clear_btn = gr.Button("🗑️ Clear", scale=1)
+
+                    gr.Examples(
+                        examples=[
+                            "Latest advances in reasoning models and their enterprise applications",
+                            "How are companies implementing agentic AI workflows in 2026?",
+                            "State of AI governance and regulation across US, EU, and China",
+                            "Open-source vs proprietary AI models: current landscape and trends",
+                            "Multimodal AI capabilities and limitations in production systems",
+                        ],
+                        inputs=ai_query_input,
+                        label="Example Queries"
+                    )
+
+                with gr.Column(scale=1):
+                    ai_status = gr.Markdown(
+                        value="### ⏳ Ready\n\nEnter a query and click **Start AI Research**",
+                        label="Status"
+                    )
+
+            ai_output = gr.Markdown(
+                label="Research Report",
+                value="*Your AI research report will appear here...*"
+            )
+
+            # Export buttons
+            with gr.Row():
+                # Show different label based on Drive configuration
+                drive_btn_label = "📁 Save to Drive" if is_drive_configured() else "📁 Save to Drive (Not configured)"
+                ai_drive_btn = gr.Button(drive_btn_label, scale=1)
+                ai_pdf_btn = gr.Button("📄 Download PDF", scale=1)
+                ai_pdf_download = gr.File(label="PDF Download", visible=False)
+
+            # Drive save status
+            ai_drive_status = gr.Markdown(value="", visible=True)
+
+            # AI Research button actions
+            ai_submit_btn.click(
+                fn=run_ai_research,
+                inputs=[ai_query_input, ai_depth_slider, ai_max_searches],
+                outputs=[ai_status, ai_output]
+            )
+
+            ai_clear_btn.click(
+                lambda: ("", 2, 15, "### ⏳ Ready\n\nEnter a query and click **Start AI Research**", "*Your AI research report will appear here...*", ""),
+                outputs=[ai_query_input, ai_depth_slider, ai_max_searches, ai_status, ai_output, ai_drive_status]
+            )
+
+            # Save to Google Drive
+            ai_drive_btn.click(
+                fn=save_report_to_drive,
+                inputs=[ai_output, ai_query_input],
+                outputs=[ai_drive_status]
+            )
+
+            # PDF Export
+            def export_ai_pdf(report, query):
+                if not report or report.startswith("*"):
+                    return None
+                return export_report_to_pdf(report, f"AI Research: {query[:50]}")
+
+            ai_pdf_btn.click(
+                fn=export_ai_pdf,
+                inputs=[ai_output, ai_query_input],
+                outputs=[ai_pdf_download]
+            )
+
+            with gr.Accordion("📋 Source Tiers & Features", open=False):
+                gr.Markdown("""
+                ### Source Prioritization Tiers
+
+                | Tier | Description | Examples |
+                |------|-------------|----------|
+                | 🎓 **Tier 1** | Academic & AI Labs | arXiv, OpenAI, DeepMind, Anthropic, MIT, Stanford |
+                | 📊 **Tier 2** | Strategic Intelligence | Bloomberg, McKinsey, Gartner, The Information |
+                | 📜 **Tier 3** | Policy & Governance | AI Now Institute, Future of Life, NIST, EU AI Office |
+                | 💻 **Tier 4** | Practitioner | Hugging Face, Towards Data Science, AI blogs |
+
+                ### Research Depth Levels
+
+                - **Depth 1**: Quick overview with 5-8 initial searches
+                - **Depth 2**: Standard research with follow-up queries on gaps
+                - **Depth 3**: Comprehensive with multiple rounds of follow-ups
+
+                ### Features
+
+                - **Recursive Research**: Automatically identifies knowledge gaps and generates follow-up queries
+                - **Circuit Breakers**: Prevents runaway recursion with configurable limits
+                - **Inline Citations**: Reports include [N] markers linking to references
+                - **Parallel Execution**: Up to 5 concurrent searches with rate limiting
+                """)
+
         # ========== Stock Research Tab ==========
         with gr.Tab("📈 Stock Research"):
             gr.Markdown("""
@@ -1367,6 +1697,13 @@ with gr.Blocks(title="Research Agent Hub", theme=gr.themes.Soft()) as demo:
                         max_lines=1,
                         scale=2
                     )
+
+                    with gr.Row():
+                        stock_deep_analysis = gr.Checkbox(
+                            label="Deep Analysis",
+                            value=False,
+                            info="Identify gaps and conduct follow-up research"
+                        )
 
                     with gr.Row():
                         stock_submit_btn = gr.Button("🚀 Generate Report", variant="primary", scale=2)
@@ -1434,18 +1771,18 @@ with gr.Blocks(title="Research Agent Hub", theme=gr.themes.Soft()) as demo:
             # Stock Research button actions
             stock_submit_btn.click(
                 fn=run_stock_research,
-                inputs=[ticker_input],
+                inputs=[ticker_input, stock_deep_analysis],
                 outputs=[stock_status, stock_output]
             )
 
             stock_clear_btn.click(
-                lambda: ("", "### ⏳ Ready\n\nEnter a ticker symbol and click **Generate Report**", "*Your comprehensive stock research report will appear here...*"),
-                outputs=[ticker_input, stock_status, stock_output]
+                lambda: ("", False, "### ⏳ Ready\n\nEnter a ticker symbol and click **Generate Report**", "*Your comprehensive stock research report will appear here...*"),
+                outputs=[ticker_input, stock_deep_analysis, stock_status, stock_output]
             )
 
             ticker_input.submit(
                 fn=run_stock_research,
-                inputs=[ticker_input],
+                inputs=[ticker_input, stock_deep_analysis],
                 outputs=[stock_status, stock_output]
             )
 

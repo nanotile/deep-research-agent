@@ -239,6 +239,207 @@ async def fetch_all_stock_data(ticker: str, company_name: str) -> StockDataBundl
 
 
 # =============================================================================
+# Gap Identification Tool (for deep analysis)
+# =============================================================================
+
+STOCK_GAP_TOOL = {
+    "name": "identify_gaps",
+    "description": "Identify gaps in the stock analysis that need follow-up research",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "gaps": {
+                "type": "array",
+                "description": "Identified gaps needing follow-up research",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "category": {
+                            "type": "string",
+                            "enum": ["competitive_position", "catalyst", "risk", "financials", "management", "regulatory"],
+                            "description": "Category of the gap"
+                        },
+                        "description": {
+                            "type": "string",
+                            "description": "Description of what information is missing"
+                        },
+                        "search_query": {
+                            "type": "string",
+                            "description": "Recommended search query to fill this gap"
+                        },
+                        "importance": {
+                            "type": "string",
+                            "enum": ["high", "medium", "low"],
+                            "description": "How important this gap is to the investment thesis"
+                        }
+                    },
+                    "required": ["category", "description", "search_query", "importance"]
+                }
+            }
+        },
+        "required": ["gaps"]
+    }
+}
+
+
+async def identify_stock_gaps(
+    ticker: str,
+    company_name: str,
+    analysis: StockAnalysis,
+    data: StockDataBundle,
+    tokens: TokenAccumulator = None,
+    model: str = None
+) -> list:
+    """
+    Identify gaps in the stock analysis that need follow-up research.
+
+    Args:
+        ticker: Stock ticker symbol
+        company_name: Company name
+        analysis: Initial StockAnalysis result
+        data: StockDataBundle with fetched data
+        tokens: Token accumulator
+        model: Claude model to use
+
+    Returns:
+        List of gap dictionaries with category, description, search_query, importance
+    """
+    print("\n🔍 Identifying analysis gaps for follow-up...")
+
+    # Format analysis summary for gap identification
+    analysis_summary = f"""
+    Ticker: {ticker} ({company_name})
+    Recommendation: {analysis.recommendation.value}
+    Confidence: {analysis.confidence}
+
+    Bull Case:
+    {chr(10).join(f'- {point}' for point in analysis.thesis.bull_case)}
+
+    Bear Case:
+    {chr(10).join(f'- {point}' for point in analysis.thesis.bear_case)}
+
+    Key Risks:
+    {chr(10).join(f'- {risk}' for risk in analysis.thesis.key_risks)}
+
+    Key Catalysts:
+    {chr(10).join(f'- {cat}' for cat in analysis.thesis.key_catalysts) if analysis.thesis.key_catalysts else '- None identified'}
+    """
+
+    # Note what data sources succeeded/failed
+    successful_sources = data.get_successful_sources()
+    failed_sources = [src for src in ['yfinance', 'finnhub', 'sec_filings', 'alpha_vantage', 'tavily_news', 'macro_sentiment']
+                      if src not in successful_sources]
+
+    prompt = f"""You are a senior equity research analyst reviewing a preliminary stock analysis.
+
+Analysis Summary:
+{analysis_summary}
+
+Data Sources Available: {', '.join(successful_sources)}
+Data Sources That Failed: {', '.join(failed_sources) if failed_sources else 'None'}
+
+Identify 2-4 gaps in this analysis that would benefit from targeted web searches.
+Focus on:
+1. Unclear competitive dynamics mentioned in bull/bear cases
+2. Risks that need more detail or recent news
+3. Upcoming catalysts that lack specifics
+4. Management or governance concerns not fully explored
+5. Regulatory or legal issues mentioned but not explained
+6. Financial metrics that seem incomplete
+
+For each gap, provide a specific search query that could fill it.
+Only identify gaps that can realistically be addressed with web searches.
+
+Use the identify_gaps tool to structure your response."""
+
+    response = await client.messages.create(
+        model=model or DEFAULT_MODEL,
+        max_tokens=1024,
+        system="You are a meticulous equity research analyst identifying gaps in investment analysis. Today's date is January 2026.",
+        messages=[{"role": "user", "content": prompt}],
+        tools=[STOCK_GAP_TOOL],
+        tool_choice={"type": "tool", "name": "identify_gaps"}
+    )
+
+    if tokens:
+        tokens.add(response)
+
+    # Extract tool use result
+    tool_use = next(block for block in response.content if block.type == "tool_use")
+    gaps = tool_use.input.get("gaps", [])
+
+    # Filter to high and medium importance gaps
+    priority_gaps = [g for g in gaps if g.get("importance") in ["high", "medium"]]
+
+    print(f"✓ Identified {len(priority_gaps)} gaps needing follow-up")
+    for gap in priority_gaps:
+        print(f"  - [{gap['category']}] {gap['description'][:50]}...")
+
+    return priority_gaps
+
+
+async def targeted_stock_search(
+    ticker: str,
+    company_name: str,
+    gaps: list,
+    tokens: TokenAccumulator = None,
+    model: str = None,
+    max_searches: int = 3
+) -> list:
+    """
+    Execute targeted searches for identified gaps.
+
+    Args:
+        ticker: Stock ticker symbol
+        company_name: Company name
+        gaps: List of gap dictionaries from identify_stock_gaps
+        tokens: Token accumulator
+        model: Claude model to use
+        max_searches: Maximum number of searches to execute
+
+    Returns:
+        List of search results with summaries
+    """
+    from agents.deep_research_agent import search_with_tavily, search_with_llm_knowledge, tavily_client
+
+    if not gaps:
+        return []
+
+    print(f"\n🔍 Executing {min(len(gaps), max_searches)} targeted follow-up searches...")
+
+    results = []
+    use_tavily = tavily_client is not None
+
+    for i, gap in enumerate(gaps[:max_searches]):
+        search_query = f"{ticker} {company_name} {gap['search_query']}"
+        print(f"  [{i+1}] Searching: {search_query[:60]}...")
+
+        try:
+            if use_tavily:
+                try:
+                    summary = await search_with_tavily(search_query, tokens, model=model)
+                except Exception:
+                    summary = await search_with_llm_knowledge(search_query, tokens, model=model)
+            else:
+                summary = await search_with_llm_knowledge(search_query, tokens, model=model)
+
+            results.append({
+                "category": gap["category"],
+                "gap_description": gap["description"],
+                "search_query": search_query,
+                "summary": summary
+            })
+            print(f"      ✓ Search complete")
+
+        except Exception as e:
+            print(f"      ⚠️ Search failed: {e}")
+            continue
+
+    print(f"✓ Completed {len(results)} follow-up searches")
+    return results
+
+
+# =============================================================================
 # Analysis Agent
 # =============================================================================
 
@@ -481,11 +682,15 @@ async def write_stock_report(
     ticker: str,
     company_name: str,
     data: StockDataBundle,
-    analysis: StockAnalysis
+    analysis: StockAnalysis,
+    followup_findings: list = None
 ) -> str:
     """
     Generate comprehensive markdown report with all data and source URLs.
     For tech/semiconductor stocks, uses the 2026 Strategic Outlook template.
+
+    Args:
+        followup_findings: Optional list of follow-up research findings from deep analysis
     """
     print("\n📝 Generating comprehensive report...")
 
@@ -855,6 +1060,19 @@ async def write_stock_report(
 
         report_sections.append("\n".join(sources_text))
 
+    # Deep Analysis Follow-up Findings (if available)
+    if followup_findings:
+        followup_text = ["---\n\n## Deep Analysis: Follow-up Research"]
+        followup_text.append("\n*The following additional research was conducted to address identified gaps in the analysis:*\n")
+
+        for finding in followup_findings:
+            category_display = finding['category'].replace('_', ' ').title()
+            followup_text.append(f"### {category_display}")
+            followup_text.append(f"**Gap Addressed:** {finding['gap_description']}\n")
+            followup_text.append(f"{finding['summary']}\n")
+
+        report_sections.append("\n".join(followup_text))
+
     # Disclaimer
     report_sections.append("""
 ---
@@ -871,18 +1089,24 @@ async def write_stock_report(
 # Main Orchestrator
 # =============================================================================
 
-async def stock_research(ticker: str, model: str = None) -> str:
+async def stock_research(ticker: str, model: str = None, deep_analysis: bool = False) -> str:
     """
     Main orchestrator function for stock research.
-    Pipeline: validate -> fetch_all -> analyze -> write_report
+    Pipeline: validate -> fetch_all -> analyze -> [deep: identify_gaps -> targeted_search] -> write_report
 
     Args:
         ticker: Stock ticker symbol
         model: Claude model to use (defaults to DEFAULT_MODEL)
+        deep_analysis: If True, identify gaps and do follow-up research
     """
     ticker = ticker.upper().strip()
     print(f"\n🎯 Researching: {ticker}")
+    if deep_analysis:
+        print("📊 Deep Analysis mode enabled")
     print("=" * 70)
+
+    # Initialize token tracking for deep analysis
+    tokens = TokenAccumulator() if deep_analysis else None
 
     # Stage 1: Validate ticker
     validation = await validate_ticker(ticker)
@@ -899,15 +1123,28 @@ async def stock_research(ticker: str, model: str = None) -> str:
         return f"# Error\n\nFailed to fetch data from any source.\n\nErrors:\n" + "\n".join(data.fetch_errors)
 
     # Stage 3: Analyze
-    analysis = await analyze_stock_data(ticker, company_name, data, model=model)
+    analysis = await analyze_stock_data(ticker, company_name, data, tokens=tokens, model=model)
 
-    # Stage 4: Write report
-    report = await write_stock_report(ticker, company_name, data, analysis)
+    # Stage 3.5: Deep Analysis - identify gaps and do follow-up research
+    followup_findings = []
+    if deep_analysis:
+        gaps = await identify_stock_gaps(ticker, company_name, analysis, data, tokens=tokens, model=model)
+        if gaps:
+            followup_findings = await targeted_stock_search(
+                ticker, company_name, gaps, tokens=tokens, model=model, max_searches=3
+            )
+
+    # Stage 4: Write report (with optional followup findings)
+    report = await write_stock_report(ticker, company_name, data, analysis, followup_findings=followup_findings)
+
+    # Add deep analysis metadata
+    if deep_analysis and followup_findings:
+        report += f"\n\n---\n*Deep analysis completed with {len(followup_findings)} follow-up searches*"
 
     return report
 
 
-async def stock_research_with_progress(ticker: str, model: str = None) -> AsyncIterator[StockProgressUpdate]:
+async def stock_research_with_progress(ticker: str, model: str = None, deep_analysis: bool = False) -> AsyncIterator[StockProgressUpdate]:
     """
     Main orchestrator with progress updates for UI.
     Yields StockProgressUpdate objects as research progresses.
@@ -915,6 +1152,7 @@ async def stock_research_with_progress(ticker: str, model: str = None) -> AsyncI
     Args:
         ticker: Stock ticker symbol
         model: Claude model to use (defaults to DEFAULT_MODEL)
+        deep_analysis: If True, identify gaps and do follow-up research
     """
     ticker = ticker.upper().strip()
     start_time = time.time()
@@ -1038,6 +1276,67 @@ async def stock_research_with_progress(ticker: str, model: str = None) -> AsyncI
         estimated_cost=tokens.estimated_cost
     )
 
+    # Stage 3.5: Deep Analysis (if enabled)
+    followup_findings = []
+    if deep_analysis:
+        # Identify gaps
+        stage_start = time.time()
+        yield StockProgressUpdate(
+            stage="identifying_gaps",
+            stage_display="Identifying Gaps",
+            current_step=1,
+            total_steps=1,
+            elapsed_time=0,
+            message="Analyzing for knowledge gaps..."
+        )
+
+        gaps = await identify_stock_gaps(ticker, company_name, analysis, data, tokens=tokens, model=model)
+
+        yield StockProgressUpdate(
+            stage="identifying_gaps",
+            stage_display="Identifying Gaps",
+            current_step=1,
+            total_steps=1,
+            elapsed_time=time.time() - stage_start,
+            message=f"Identified {len(gaps)} gaps needing follow-up",
+            input_tokens=tokens.input_tokens,
+            output_tokens=tokens.output_tokens,
+            total_tokens=tokens.total_tokens,
+            estimated_cost=tokens.estimated_cost
+        )
+
+        # Execute targeted searches if gaps found
+        if gaps:
+            stage_start = time.time()
+            max_followup = min(3, len(gaps))
+
+            for i, gap in enumerate(gaps[:max_followup], 1):
+                yield StockProgressUpdate(
+                    stage="followup_research",
+                    stage_display="Follow-up Research",
+                    current_step=i,
+                    total_steps=max_followup,
+                    elapsed_time=time.time() - stage_start,
+                    message=f"Researching: {gap['category'].replace('_', ' ').title()}..."
+                )
+
+            followup_findings = await targeted_stock_search(
+                ticker, company_name, gaps, tokens=tokens, model=model, max_searches=3
+            )
+
+            yield StockProgressUpdate(
+                stage="followup_research",
+                stage_display="Follow-up Research",
+                current_step=max_followup,
+                total_steps=max_followup,
+                elapsed_time=time.time() - stage_start,
+                message=f"Completed {len(followup_findings)} follow-up searches",
+                input_tokens=tokens.input_tokens,
+                output_tokens=tokens.output_tokens,
+                total_tokens=tokens.total_tokens,
+                estimated_cost=tokens.estimated_cost
+            )
+
     # Stage 4: Write report
     stage_start = time.time()
     yield StockProgressUpdate(
@@ -1049,7 +1348,7 @@ async def stock_research_with_progress(ticker: str, model: str = None) -> AsyncI
         message="Generating comprehensive report..."
     )
 
-    report = await write_stock_report(ticker, company_name, data, analysis)
+    report = await write_stock_report(ticker, company_name, data, analysis, followup_findings=followup_findings)
 
     yield StockProgressUpdate(
         stage="writing",
