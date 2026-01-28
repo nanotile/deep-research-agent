@@ -82,6 +82,7 @@ class ProgressUpdate:
     max_depth: int = 1
     learnings_count: int = 0
     total_searches: int = 0
+    gaps_identified: Optional[List[str]] = None  # Gap descriptions for UI display
 
 
 @dataclass
@@ -96,6 +97,8 @@ class DeepResearchState:
     pending_searches: List[Dict[str, str]] = field(default_factory=list)
     total_searches: int = 0
     max_total_searches: int = 15
+    summaries_by_depth: Dict[int, List[Dict[str, str]]] = field(default_factory=dict)
+    gaps_by_depth: Dict[int, List[str]] = field(default_factory=dict)
 
 
 @dataclass
@@ -105,6 +108,42 @@ class Learning:
     confidence: float
     source_queries: List[str]
     follow_up_queries: List[str] = field(default_factory=list)
+
+def add_depth_breakdown(state: DeepResearchState) -> str:
+    """Generate a collapsible research depth breakdown appendix for the report."""
+    sections = ["\n\n---\n\n<details>\n<summary><strong>Research Depth Breakdown</strong></summary>\n"]
+
+    for depth_level in sorted(state.summaries_by_depth.keys()):
+        summaries = state.summaries_by_depth[depth_level]
+        if depth_level == 1:
+            header = f"### Initial Research ({len(summaries)} searches)"
+        else:
+            header = f"### Follow-up Research — Depth {depth_level} ({len(summaries)} searches)"
+
+        sections.append(header)
+
+        # Show gaps that prompted this depth level (for depth > 1)
+        prev_depth = depth_level - 1
+        if prev_depth in state.gaps_by_depth and state.gaps_by_depth[prev_depth]:
+            sections.append("\n**Gaps Addressed:**")
+            for gap in state.gaps_by_depth[prev_depth][:5]:
+                display = gap[:100] + "..." if len(gap) > 100 else gap
+                sections.append(f"- {display}")
+
+        # List search topics and brief findings
+        sections.append("\n**Searches:**")
+        for s in summaries:
+            term = s.get('search_term', 'Unknown')
+            summary_text = s.get('summary', '')
+            brief = summary_text[:120] + "..." if len(summary_text) > 120 else summary_text
+            sections.append(f"- **{term}**: {brief}")
+        sections.append("")
+
+    sections.append(f"\n*Research completed: {state.current_depth} depth levels, {state.total_searches} total searches, {len(state.learnings)} learnings extracted*")
+    sections.append("\n</details>")
+
+    return "\n".join(sections)
+
 
 # Configuration - read from .env with defaults
 HOW_MANY_SEARCHES = int(os.getenv("HOW_MANY_SEARCHES", "3"))
@@ -704,6 +743,7 @@ async def deep_research(
     state.total_searches += len(search_results)
     state.completed_queries.extend([item['search_term'] for item in search_items])
     state.current_depth = 1
+    state.summaries_by_depth[1] = list(search_results)
 
     # Recursive research for depth > 1
     if depth > 1:
@@ -718,6 +758,7 @@ async def deep_research(
                 model=model
             )
             state.learnings.extend(new_learnings)
+            state.gaps_by_depth[state.current_depth] = follow_up_queries
 
             if not follow_up_queries:
                 print("✓ No knowledge gaps identified, research complete")
@@ -743,12 +784,15 @@ async def deep_research(
             state.total_searches += len(search_results)
             state.completed_queries.extend([item['search_term'] for item in follow_up_items])
             state.current_depth += 1
+            state.summaries_by_depth[state.current_depth] = list(search_results)
 
     # Stage 3: Write Report (using all gathered research)
     final_report = await write_report(query, state.all_summaries, model=model)
 
-    # Add depth metadata to report
-    if depth > 1:
+    # Add depth breakdown appendix if recursive research was performed
+    if depth > 1 and len(state.summaries_by_depth) > 1:
+        final_report += add_depth_breakdown(state)
+    elif depth > 1:
         final_report += f"\n\n---\n*Research completed at depth {state.current_depth}/{depth}, {state.total_searches} total searches*"
 
     # Stage 4: Email (optional)
@@ -862,6 +906,7 @@ async def deep_research_with_progress(
     state.total_searches += len(search_results)
     state.completed_queries.extend([item['search_term'] for item in search_items])
     state.current_depth = 1
+    state.summaries_by_depth[1] = list(search_results)
 
     yield ProgressUpdate(
         stage="searching",
@@ -901,6 +946,7 @@ async def deep_research_with_progress(
                 model=model
             )
             state.learnings.extend(new_learnings)
+            state.gaps_by_depth[state.current_depth] = follow_up_queries
 
             yield ProgressUpdate(
                 stage="extracting",
@@ -912,7 +958,8 @@ async def deep_research_with_progress(
                 current_depth=state.current_depth,
                 max_depth=depth,
                 total_searches=state.total_searches,
-                learnings_count=len(state.learnings)
+                learnings_count=len(state.learnings),
+                gaps_identified=follow_up_queries[:5]
             )
 
             if not follow_up_queries:
@@ -991,6 +1038,7 @@ async def deep_research_with_progress(
             state.all_summaries.extend(search_results)
             state.total_searches += len(search_results)
             state.completed_queries.extend([item['search_term'] for item in follow_up_items])
+            state.summaries_by_depth[state.current_depth] = list(search_results)
 
             yield ProgressUpdate(
                 stage="searching",
@@ -1022,8 +1070,10 @@ async def deep_research_with_progress(
 
     final_report = await write_report(query, state.all_summaries, tokens, model=model)
 
-    # Add depth metadata to report if recursive
-    if depth > 1:
+    # Add depth breakdown appendix if recursive research was performed
+    if depth > 1 and len(state.summaries_by_depth) > 1:
+        final_report += add_depth_breakdown(state)
+    elif depth > 1:
         final_report += f"\n\n---\n*Research completed at depth {state.current_depth}/{depth}, {state.total_searches} total searches, {len(state.learnings)} learnings extracted*"
 
     yield ProgressUpdate(

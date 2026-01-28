@@ -1062,8 +1062,9 @@ async def write_stock_report(
 
     # Deep Analysis Follow-up Findings (if available)
     if followup_findings:
-        followup_text = ["---\n\n## Deep Analysis: Follow-up Research"]
-        followup_text.append("\n*The following additional research was conducted to address identified gaps in the analysis:*\n")
+        followup_text = ["---\n\n<details open>"]
+        followup_text.append("<summary><strong>Deep Analysis: Follow-up Research</strong></summary>\n")
+        followup_text.append("*The following additional research was conducted to address identified gaps in the analysis:*\n")
 
         for finding in followup_findings:
             category_display = finding['category'].replace('_', ' ').title()
@@ -1071,6 +1072,7 @@ async def write_stock_report(
             followup_text.append(f"**Gap Addressed:** {finding['gap_description']}\n")
             followup_text.append(f"{finding['summary']}\n")
 
+        followup_text.append("</details>")
         report_sections.append("\n".join(followup_text))
 
     # Disclaimer
@@ -1302,7 +1304,8 @@ async def stock_research_with_progress(ticker: str, model: str = None, deep_anal
             input_tokens=tokens.input_tokens,
             output_tokens=tokens.output_tokens,
             total_tokens=tokens.total_tokens,
-            estimated_cost=tokens.estimated_cost
+            estimated_cost=tokens.estimated_cost,
+            gaps_identified=[{"category": g["category"], "description": g["description"]} for g in gaps] if gaps else None
         )
 
         # Execute targeted searches if gaps found

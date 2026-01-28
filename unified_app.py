@@ -153,6 +153,11 @@ def format_research_progress(update: ProgressUpdate, total_elapsed: float) -> st
             lines.append(f"**Total Searches:** {update.total_searches}")
         if update.learnings_count > 0:
             lines.append(f"**Learnings:** {update.learnings_count}")
+        if update.gaps_identified:
+            lines.append(f"\n**Gaps Found ({len(update.gaps_identified)}):**")
+            for gap in update.gaps_identified:
+                display = gap[:80] + "..." if len(gap) > 80 else gap
+                lines.append(f"  • {display}")
 
     lines.append(f"\n---\n**Total elapsed:** {total_elapsed:.1f}s")
 
@@ -374,6 +379,13 @@ def format_stock_progress(update: StockProgressUpdate, total_elapsed: float) -> 
             source_name = source.replace('_', ' ').title()
             source_lines.append(f"  {source_icons.get(status, '⏳')} {source_name}")
         lines.append("\n**Data Sources:**\n" + "\n".join(source_lines))
+
+    if update.gaps_identified:
+        lines.append(f"\n**Gaps Identified ({len(update.gaps_identified)}):**")
+        for gap in update.gaps_identified:
+            category = gap['category'].replace('_', ' ').title()
+            desc = gap['description'][:60] + "..." if len(gap['description']) > 60 else gap['description']
+            lines.append(f"  • **{category}:** {desc}")
 
     if update.elapsed_time > 0:
         lines.append(f"\n**Stage time:** {update.elapsed_time:.1f}s")

@@ -476,3 +476,4 @@ class StockProgressUpdate(BaseModel):
     output_tokens: int = 0
     total_tokens: int = 0
     estimated_cost: float = 0.0
+    gaps_identified: Optional[List[Dict[str, str]]] = None  # [{category, description}]
