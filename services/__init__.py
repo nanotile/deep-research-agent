@@ -26,6 +26,13 @@ from .market_context_2026 import (
     get_2026_analysis_prompt_injection,
 )
 
+from .google_drive_service import (
+    is_drive_configured,
+    create_google_doc,
+    save_report_to_drive,
+    DriveExportResult,
+)
+
 __all__ = [
     # Data fetchers
     "validate_ticker",
@@ -45,4 +52,9 @@ __all__ = [
     "get_process_node_status",
     "get_software_moat",
     "get_2026_analysis_prompt_injection",
+    # Google Drive export
+    "is_drive_configured",
+    "create_google_doc",
+    "save_report_to_drive",
+    "DriveExportResult",
 ]
