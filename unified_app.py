@@ -534,7 +534,7 @@ def format_commodity_progress(update: CommodityProgressUpdate, total_elapsed: fl
     return "\n".join(lines)
 
 
-def run_commodity_research(symbol_input: str, request: gr.Request = None):
+def run_commodity_research(symbol_input: str, deep_analysis: bool = False, request: gr.Request = None):
     """Generator function that yields progress updates and final report for Commodity Research."""
     if not symbol_input or symbol_input.strip() == "":
         yield (
@@ -544,13 +544,13 @@ def run_commodity_research(symbol_input: str, request: gr.Request = None):
         return
 
     cleaned = symbol_input.strip()
-    logger.info(f"Starting commodity research for: {cleaned}")
+    logger.info(f"Starting commodity research for: {cleaned} (deep_analysis={deep_analysis})")
 
     progress_queue = Queue()
 
     def run_async_research():
         async def async_wrapper():
-            async for update in commodity_research_with_progress(cleaned):
+            async for update in commodity_research_with_progress(cleaned, deep_analysis=deep_analysis):
                 progress_queue.put(update)
 
         loop = asyncio.new_event_loop()
@@ -2354,13 +2354,13 @@ with gr.Blocks(title="Research Agent Hub", theme=gr.themes.Soft()) as demo:
             # Event handlers
             commodity_submit_btn.click(
                 fn=run_commodity_research,
-                inputs=[commodity_input],
+                inputs=[commodity_input, commodity_deep_analysis],
                 outputs=[commodity_status, commodity_output]
             )
 
             commodity_input.submit(
                 fn=run_commodity_research,
-                inputs=[commodity_input],
+                inputs=[commodity_input, commodity_deep_analysis],
                 outputs=[commodity_status, commodity_output]
             )
 

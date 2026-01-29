@@ -155,6 +155,177 @@ COMMODITY_ANALYSIS_TOOL = {
 
 
 # =============================================================================
+# Gap Identification Tool for Deep Analysis
+# =============================================================================
+
+COMMODITY_GAP_TOOL = {
+    "name": "identify_gaps",
+    "description": "Identify gaps in the commodity analysis that need follow-up research",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "gaps": {
+                "type": "array",
+                "description": "Identified gaps needing follow-up research",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "category": {
+                            "type": "string",
+                            "enum": ["supply_chain", "geopolitical", "demand_outlook", "macro_policy", "technical_levels", "regulatory"],
+                            "description": "Category of the gap",
+                        },
+                        "description": {
+                            "type": "string",
+                            "description": "Description of what information is missing",
+                        },
+                        "search_query": {
+                            "type": "string",
+                            "description": "Recommended search query to fill this gap",
+                        },
+                        "importance": {
+                            "type": "string",
+                            "enum": ["high", "medium", "low"],
+                            "description": "How important this gap is to the commodity outlook",
+                        },
+                    },
+                    "required": ["category", "description", "search_query", "importance"],
+                },
+            }
+        },
+        "required": ["gaps"],
+    },
+}
+
+
+async def identify_commodity_gaps(
+    symbol: str,
+    display_name: str,
+    analysis: CommodityAnalysis,
+    data: CommodityDataBundle,
+    tokens: TokenAccumulator,
+    model: str = None,
+) -> list:
+    """Identify gaps in the commodity analysis that need follow-up research."""
+    print("\n  Identifying analysis gaps for follow-up...")
+
+    analysis_summary = f"""
+    Commodity: {display_name} ({symbol})
+    Outlook: {analysis.outlook.value}
+    Confidence: {analysis.confidence}
+    Supply/Demand: {analysis.supply_demand_balance or 'Not assessed'}
+
+    Bull Case:
+    {chr(10).join(f'- {point}' for point in analysis.thesis.bull_case)}
+
+    Bear Case:
+    {chr(10).join(f'- {point}' for point in analysis.thesis.bear_case)}
+
+    Key Risks:
+    {chr(10).join(f'- {risk}' for risk in analysis.thesis.key_risks)}
+
+    Key Catalysts:
+    {chr(10).join(f'- {c}' for c in analysis.thesis.key_catalysts) if analysis.thesis.key_catalysts else '- None identified'}
+    """
+
+    successful_sources = data.get_successful_sources()
+    all_sources = ["yfinance", "alpha_vantage", "fred_macro", "tavily_news"]
+    failed_sources = [s for s in all_sources if s not in successful_sources]
+
+    prompt = f"""You are a senior commodities analyst reviewing a preliminary analysis.
+
+Analysis Summary:
+{analysis_summary}
+
+Data Sources Available: {', '.join(successful_sources)}
+Data Sources That Failed: {', '.join(failed_sources) if failed_sources else 'None'}
+
+Identify 2-4 gaps in this analysis that would benefit from targeted web searches.
+Focus on:
+1. Supply chain disruptions or production changes not fully explored
+2. Geopolitical events affecting this commodity's market
+3. Demand outlook from major consuming sectors or countries
+4. Central bank or government policy impacts (tariffs, sanctions, reserves)
+5. Key technical price levels or seasonal patterns missing context
+6. Regulatory changes affecting production, trade, or storage
+
+For each gap, provide a specific search query that could fill it.
+Only identify gaps that can realistically be addressed with web searches.
+
+Use the identify_gaps tool to structure your response."""
+
+    response = await client.messages.create(
+        model=model or DEFAULT_MODEL,
+        max_tokens=1024,
+        system="You are a meticulous commodities research analyst identifying gaps in market analysis. Today's date is January 2026.",
+        messages=[{"role": "user", "content": prompt}],
+        tools=[COMMODITY_GAP_TOOL],
+        tool_choice={"type": "tool", "name": "identify_gaps"},
+    )
+
+    tokens.add(response)
+
+    tool_use = next(block for block in response.content if block.type == "tool_use")
+    gaps = tool_use.input.get("gaps", [])
+
+    priority_gaps = [g for g in gaps if g.get("importance") in ["high", "medium"]]
+
+    print(f"  Identified {len(priority_gaps)} gaps needing follow-up")
+    for gap in priority_gaps:
+        print(f"    - [{gap['category']}] {gap['description'][:50]}...")
+
+    return priority_gaps
+
+
+async def targeted_commodity_search(
+    symbol: str,
+    display_name: str,
+    gaps: list,
+    tokens: TokenAccumulator,
+    model: str = None,
+    max_searches: int = 3,
+) -> list:
+    """Execute targeted searches for identified commodity analysis gaps."""
+    from agents.deep_research_agent import search_with_tavily, search_with_llm_knowledge, tavily_client
+
+    if not gaps:
+        return []
+
+    print(f"\n  Executing {min(len(gaps), max_searches)} targeted follow-up searches...")
+
+    results = []
+    use_tavily = tavily_client is not None
+
+    for i, gap in enumerate(gaps[:max_searches]):
+        search_query = f"{display_name} {gap['search_query']}"
+        print(f"    [{i+1}] Searching: {search_query[:60]}...")
+
+        try:
+            if use_tavily:
+                try:
+                    summary = await search_with_tavily(search_query, tokens, model=model)
+                except Exception:
+                    summary = await search_with_llm_knowledge(search_query, tokens, model=model)
+            else:
+                summary = await search_with_llm_knowledge(search_query, tokens, model=model)
+
+            results.append({
+                "category": gap["category"],
+                "gap_description": gap["description"],
+                "search_query": search_query,
+                "summary": summary,
+            })
+            print(f"        Search complete")
+
+        except Exception as e:
+            print(f"        Search failed: {e}")
+            continue
+
+    print(f"  Completed {len(results)} follow-up searches")
+    return results
+
+
+# =============================================================================
 # Analysis Agent
 # =============================================================================
 
@@ -299,6 +470,7 @@ async def write_commodity_report(
     display_name: str,
     data: CommodityDataBundle,
     analysis: CommodityAnalysis,
+    followup_findings: list = None,
 ) -> str:
     """Generate comprehensive markdown report."""
     print(f"\n  Generating report for {display_name}...")
@@ -445,6 +617,21 @@ async def write_commodity_report(
 {chr(10).join(source_links[:15])}
 """)
 
+    # Deep Analysis Follow-up Findings (if available)
+    if followup_findings:
+        followup_text = ["---\n\n<details open>"]
+        followup_text.append("<summary><strong>Deep Analysis: Follow-up Research</strong></summary>\n")
+        followup_text.append("*The following additional research was conducted to address identified gaps in the analysis:*\n")
+
+        for finding in followup_findings:
+            category_display = finding['category'].replace('_', ' ').title()
+            followup_text.append(f"### {category_display}")
+            followup_text.append(f"**Gap Addressed:** {finding['gap_description']}\n")
+            followup_text.append(f"{finding['summary']}\n")
+
+        followup_text.append("</details>")
+        sections.append("\n".join(followup_text))
+
     # Disclaimer
     sections.append("""
 ---
@@ -461,10 +648,10 @@ async def write_commodity_report(
 # Main Orchestrators
 # =============================================================================
 
-async def commodity_research(symbol_input: str, model: str = None) -> str:
+async def commodity_research(symbol_input: str, model: str = None, deep_analysis: bool = False) -> str:
     """
     Simple async entry point for commodity research.
-    Pipeline: validate -> fetch_all -> analyze -> write_report
+    Pipeline: validate -> fetch_all -> analyze -> [deep: identify_gaps -> targeted_search] -> write_report
     """
     print(f"\n  Researching commodity: {symbol_input}")
     print("=" * 70)
@@ -493,18 +680,30 @@ async def commodity_research(symbol_input: str, model: str = None) -> str:
     # Analyze
     analysis = await analyze_commodity_data(symbol, display_name, data, tokens, model=model)
 
+    # Deep Analysis: identify gaps and do follow-up research
+    followup_findings = []
+    if deep_analysis:
+        gaps = await identify_commodity_gaps(symbol, display_name, analysis, data, tokens, model=model)
+        if gaps:
+            followup_findings = await targeted_commodity_search(
+                symbol, display_name, gaps, tokens, model=model, max_searches=3
+            )
+
     # Report
-    report = await write_commodity_report(symbol, display_name, data, analysis)
+    report = await write_commodity_report(symbol, display_name, data, analysis, followup_findings=followup_findings)
+
+    if deep_analysis and followup_findings:
+        report += f"\n\n---\n*Deep analysis completed with {len(followup_findings)} follow-up searches*"
 
     return report
 
 
 async def commodity_research_with_progress(
-    symbol_input: str, model: str = None
+    symbol_input: str, model: str = None, deep_analysis: bool = False
 ) -> AsyncIterator[CommodityProgressUpdate]:
     """
     Async generator yielding CommodityProgressUpdate for UI.
-    Stages: validating -> fetching -> analyzing -> writing -> complete
+    Stages: validating -> fetching -> analyzing -> [identifying_gaps -> followup_research] -> writing -> complete
     """
     start_time = time.time()
     tokens = TokenAccumulator()
@@ -633,6 +832,68 @@ async def commodity_research_with_progress(
         estimated_cost=tokens.estimated_cost,
     )
 
+    # Stage 3.5: Deep Analysis (if enabled)
+    followup_findings = []
+    if deep_analysis:
+        # Identify gaps
+        stage_start = time.time()
+        yield CommodityProgressUpdate(
+            stage="identifying_gaps",
+            stage_display="Identifying Gaps",
+            current_step=1,
+            total_steps=1,
+            elapsed_time=0,
+            message="Analyzing for knowledge gaps...",
+        )
+
+        gaps = await identify_commodity_gaps(symbol, display_name, analysis, data, tokens, model=model)
+
+        gap_categories = [g["category"].replace("_", " ").title() for g in gaps] if gaps else []
+        yield CommodityProgressUpdate(
+            stage="identifying_gaps",
+            stage_display="Identifying Gaps",
+            current_step=1,
+            total_steps=1,
+            elapsed_time=time.time() - stage_start,
+            message=f"Identified {len(gaps)} gaps: {', '.join(gap_categories)}" if gaps else "No significant gaps found",
+            input_tokens=tokens.input_tokens,
+            output_tokens=tokens.output_tokens,
+            total_tokens=tokens.total_tokens,
+            estimated_cost=tokens.estimated_cost,
+        )
+
+        # Execute targeted searches if gaps found
+        if gaps:
+            stage_start = time.time()
+            max_followup = min(3, len(gaps))
+
+            for i, gap in enumerate(gaps[:max_followup], 1):
+                yield CommodityProgressUpdate(
+                    stage="followup_research",
+                    stage_display="Follow-up Research",
+                    current_step=i,
+                    total_steps=max_followup,
+                    elapsed_time=time.time() - stage_start,
+                    message=f"Researching: {gap['category'].replace('_', ' ').title()}...",
+                )
+
+            followup_findings = await targeted_commodity_search(
+                symbol, display_name, gaps, tokens, model=model, max_searches=3
+            )
+
+            yield CommodityProgressUpdate(
+                stage="followup_research",
+                stage_display="Follow-up Research",
+                current_step=max_followup,
+                total_steps=max_followup,
+                elapsed_time=time.time() - stage_start,
+                message=f"Completed {len(followup_findings)} follow-up searches",
+                input_tokens=tokens.input_tokens,
+                output_tokens=tokens.output_tokens,
+                total_tokens=tokens.total_tokens,
+                estimated_cost=tokens.estimated_cost,
+            )
+
     # Stage 4: Write report
     stage_start = time.time()
     yield CommodityProgressUpdate(
@@ -644,7 +905,7 @@ async def commodity_research_with_progress(
         message="Generating comprehensive report...",
     )
 
-    report = await write_commodity_report(symbol, display_name, data, analysis)
+    report = await write_commodity_report(symbol, display_name, data, analysis, followup_findings=followup_findings)
 
     yield CommodityProgressUpdate(
         stage="writing",
