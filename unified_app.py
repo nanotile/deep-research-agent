@@ -62,6 +62,12 @@ from agents.ai_research_agent import (
 )
 from models.ai_research_models import AIResearchProgressUpdate as AIProgressModel
 
+# Import Commodity Research Agent
+from agents.commodity_research_agent import (
+    commodity_research_with_progress,
+)
+from models.commodity_data_models import CommodityProgressUpdate
+
 # Import Google Drive service
 from services.google_drive_service import save_report_to_drive, is_drive_configured
 
@@ -482,6 +488,118 @@ def run_stock_research(ticker: str, deep_analysis: bool = False, request: gr.Req
                 break
             else:
                 status = format_stock_progress(update, total_elapsed)
+                yield status, report
+
+        except:
+            pass
+
+    thread.join()
+
+
+# ============================================================
+# Commodity Research Helper Functions
+# ============================================================
+
+def format_commodity_progress(update: CommodityProgressUpdate, total_elapsed: float) -> str:
+    """Format progress update for Commodity Research display"""
+    stage_icons = {
+        "validating": "🔍",
+        "fetching": "📡",
+        "analyzing": "🧠",
+        "writing": "📝",
+        "complete": "✅",
+        "error": "❌"
+    }
+
+    icon = stage_icons.get(update.stage, "⏳")
+
+    lines = [
+        f"### {icon} {update.stage_display}",
+        f"**Status:** {update.message}",
+    ]
+
+    if update.source_status:
+        source_icons = {"success": "✅", "failed": "❌", "pending": "⏳"}
+        source_lines = []
+        for source, status in update.source_status.items():
+            source_name = source.replace('_', ' ').title()
+            source_lines.append(f"  {source_icons.get(status, '⏳')} {source_name}")
+        lines.append("\n**Data Sources:**\n" + "\n".join(source_lines))
+
+    if update.elapsed_time > 0:
+        lines.append(f"\n**Stage time:** {update.elapsed_time:.1f}s")
+
+    lines.append(f"\n---\n**Total elapsed:** {total_elapsed:.1f}s")
+
+    return "\n".join(lines)
+
+
+def run_commodity_research(symbol_input: str, request: gr.Request = None):
+    """Generator function that yields progress updates and final report for Commodity Research."""
+    if not symbol_input or symbol_input.strip() == "":
+        yield (
+            "### ⚠️ Input Required\n\nPlease enter a commodity name or symbol!",
+            "*Enter a commodity like gold, crude, or copper to generate a research report...*"
+        )
+        return
+
+    cleaned = symbol_input.strip()
+    logger.info(f"Starting commodity research for: {cleaned}")
+
+    progress_queue = Queue()
+
+    def run_async_research():
+        async def async_wrapper():
+            async for update in commodity_research_with_progress(cleaned):
+                progress_queue.put(update)
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(async_wrapper())
+        except Exception as e:
+            progress_queue.put(Exception(str(e)))
+        finally:
+            loop.close()
+
+    thread = Thread(target=run_async_research)
+    thread.start()
+
+    start_time = time.time()
+    report = f"*Researching {cleaned}...*"
+
+    yield (
+        f"### ⏳ Starting Research\n\nInitializing research for **{cleaned}**...",
+        report
+    )
+
+    while thread.is_alive() or not progress_queue.empty():
+        try:
+            update = progress_queue.get(timeout=0.5)
+
+            if isinstance(update, Exception):
+                total_time = time.time() - start_time
+                error_status = f"### ❌ Error\n\nAn error occurred: {update}\n\n**Time:** {total_time:.1f}s"
+                yield (
+                    error_status,
+                    f"❌ **Error occurred:**\n\n```\n{update}\n```\n\nPlease check your API keys and try again."
+                )
+                break
+
+            total_elapsed = time.time() - start_time
+
+            if update.stage == "complete":
+                status = f"### ✅ Research Complete!\n\n**Total time:** {total_elapsed:.1f}s"
+                if update.analysis:
+                    outlook = update.analysis.outlook.value.upper()
+                    status += f"\n\n**Outlook:** {outlook}"
+                if update.total_tokens > 0:
+                    status += f"\n\n📊 **Token Usage:** {update.total_tokens:,} tokens (${update.estimated_cost:.4f})"
+                    status += f"\n   - Input: {update.input_tokens:,} | Output: {update.output_tokens:,}"
+                yield status, update.report
+                break
+            else:
+                status = format_commodity_progress(update, total_elapsed)
                 yield status, report
 
         except:
@@ -2173,6 +2291,99 @@ with gr.Blocks(title="Research Agent Hub", theme=gr.themes.Soft()) as demo:
             earnings_clear_btn.click(
                 lambda: ("", "### ⏳ Ready\n\nEnter ticker symbols and click **Analyze Earnings**", "*Earnings analysis will appear here...*"),
                 outputs=[earnings_tickers, earnings_status, earnings_output]
+            )
+
+        # ========== Commodities Tab ==========
+        with gr.Tab("🛢️ Commodities"):
+            gr.Markdown("""
+            ### AI-Powered Commodity & Futures Research
+
+            Enter a commodity name or futures symbol to generate a detailed market analysis:
+            - **Market Outlook** (Bullish/Neutral/Bearish with confidence)
+            - **Bull & Bear Cases** with catalysts and risks
+            - **Price Action** (spot, range, performance)
+            - **Macro Environment** (USD, yields, inflation from FRED)
+            - **Supply & Demand Assessment**
+            - **Latest News** (commodity-specific search)
+            """)
+
+            with gr.Row():
+                with gr.Column(scale=2):
+                    commodity_input = gr.Textbox(
+                        label="🛢️ Commodity",
+                        placeholder="e.g., gold, crude, copper, natgas, GC=F",
+                        max_lines=1,
+                        scale=2
+                    )
+
+                    with gr.Row():
+                        commodity_submit_btn = gr.Button("🚀 Generate Report", variant="primary", scale=2)
+                        commodity_clear_btn = gr.Button("🗑️ Clear", scale=1)
+
+                    gr.Examples(
+                        examples=["gold", "silver", "crude", "natgas", "copper", "corn", "wheat"],
+                        inputs=commodity_input,
+                        label="Popular Commodities"
+                    )
+
+                with gr.Column(scale=1):
+                    commodity_status = gr.Markdown(
+                        value="### ⏳ Ready\n\nEnter a commodity and click **Generate Report**",
+                        label="Status"
+                    )
+
+            commodity_output = gr.Markdown(
+                label="Research Report",
+                value="*Your commodity research report will appear here...*"
+            )
+
+            # Export buttons
+            with gr.Row():
+                commodity_copy_btn = gr.Button("📋 Copy Report", scale=1)
+                commodity_pdf_btn = gr.Button("📄 Download PDF", scale=1)
+                commodity_pdf_file = gr.File(label="PDF Download", visible=True, interactive=False)
+
+            # Event handlers
+            commodity_submit_btn.click(
+                fn=run_commodity_research,
+                inputs=[commodity_input],
+                outputs=[commodity_status, commodity_output]
+            )
+
+            commodity_input.submit(
+                fn=run_commodity_research,
+                inputs=[commodity_input],
+                outputs=[commodity_status, commodity_output]
+            )
+
+            commodity_clear_btn.click(
+                lambda: ("", "### ⏳ Ready\n\nEnter a commodity and click **Generate Report**", "*Your commodity research report will appear here...*"),
+                outputs=[commodity_input, commodity_status, commodity_output]
+            )
+
+            # Copy button (clipboard JS)
+            commodity_copy_btn.click(
+                fn=None,
+                inputs=[commodity_output],
+                js="(text) => { navigator.clipboard.writeText(text); }"
+            )
+
+            # PDF export
+            def export_commodity_pdf(report_md):
+                if not report_md or report_md.startswith("*Your"):
+                    return None
+                try:
+                    filename = generate_report_filename("commodity", "report")
+                    pdf_path = markdown_to_pdf(report_md, filename)
+                    return pdf_path
+                except Exception as e:
+                    logger.error(f"PDF export error: {e}")
+                    return None
+
+            commodity_pdf_btn.click(
+                fn=export_commodity_pdf,
+                inputs=[commodity_output],
+                outputs=[commodity_pdf_file]
             )
 
         # ========== Alerts Tab ==========

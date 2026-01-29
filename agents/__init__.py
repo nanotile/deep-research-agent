@@ -41,6 +41,10 @@ from .alert_system import (
     send_test_email,
     AlertType,
 )
+from .commodity_research_agent import (
+    commodity_research,
+    commodity_research_with_progress,
+)
 
 __all__ = [
     # Deep Research
@@ -73,4 +77,7 @@ __all__ = [
     "check_all_alerts",
     "send_test_email",
     "AlertType",
+    # Commodity Research
+    "commodity_research",
+    "commodity_research_with_progress",
 ]
