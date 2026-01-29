@@ -17,7 +17,8 @@ from dotenv import load_dotenv
 from agents.deep_research_agent import (
     deep_research_with_progress,
     ProgressUpdate,
-    tavily_client
+    tavily_client,
+    send_email_report,
 )
 
 # Import Stock Research components
@@ -103,6 +104,25 @@ stock_limiter = RateLimiter(
     window_seconds=RATE_LIMIT_WINDOW_SECONDS
 )
 
+# Email report configuration
+AUTO_EMAIL_REPORTS = os.getenv("AUTO_EMAIL_REPORTS", "false").lower() == "true"
+DEFAULT_EMAIL_RECIPIENT = os.getenv("DEFAULT_EMAIL_RECIPIENT", "")
+
+
+def email_report_if_requested(send_email: bool, recipient: str, subject: str, report: str) -> str:
+    """Send report email synchronously. Returns status message."""
+    if not send_email or not recipient or not recipient.strip():
+        return ""
+    recipient = recipient.strip()
+    try:
+        loop = asyncio.new_event_loop()
+        result = loop.run_until_complete(send_email_report(recipient, subject, report))
+        loop.close()
+        return result
+    except Exception as e:
+        return f"Email failed: {e}"
+
+
 # Session tracking for rate limiting (simple approach)
 _session_counter = 0
 def get_session_id(request: gr.Request = None) -> str:
@@ -175,7 +195,7 @@ def format_research_progress(update: ProgressUpdate, total_elapsed: float) -> st
     return "\n".join(lines)
 
 
-def run_research_with_progress(query: str, depth: int = 1, max_searches: int = 6, request: gr.Request = None):
+def run_research_with_progress(query: str, depth: int = 1, max_searches: int = 6, send_email: bool = False, email_recipient: str = "", request: gr.Request = None):
     """Generator function that yields progress updates and final report for Deep Research."""
     # Input validation
     if not query or query.strip() == "":
@@ -245,6 +265,13 @@ def run_research_with_progress(query: str, depth: int = 1, max_searches: int = 6
                     status += f"\n\n📊 **Token Usage:** {update.total_tokens:,} tokens (${update.estimated_cost:.4f})"
                     status += f"\n   - Input: {update.input_tokens:,} | Output: {update.output_tokens:,}"
                 yield status, update.report
+                # Email report if requested
+                if send_email and email_recipient:
+                    yield (status + "\n\n📧 **Sending email...**", update.report)
+                    email_result = email_report_if_requested(send_email, email_recipient, f"Deep Research: {sanitized_query[:80]}", update.report)
+                    if email_result:
+                        status += f"\n\n📧 {email_result}"
+                    yield (status, update.report)
                 break
             else:
                 status = format_research_progress(update, total_elapsed)
@@ -401,7 +428,7 @@ def format_stock_progress(update: StockProgressUpdate, total_elapsed: float) -> 
     return "\n".join(lines)
 
 
-def run_stock_research(ticker: str, deep_analysis: bool = False, request: gr.Request = None):
+def run_stock_research(ticker: str, deep_analysis: bool = False, send_email: bool = False, email_recipient: str = "", request: gr.Request = None):
     """Generator function that yields progress updates and final report for Stock Research."""
     # Input validation
     if not ticker or ticker.strip() == "":
@@ -485,6 +512,13 @@ def run_stock_research(ticker: str, deep_analysis: bool = False, request: gr.Req
                     status += f"\n\n📊 **Token Usage:** {update.total_tokens:,} tokens (${update.estimated_cost:.4f})"
                     status += f"\n   - Input: {update.input_tokens:,} | Output: {update.output_tokens:,}"
                 yield status, update.report
+                # Email report if requested
+                if send_email and email_recipient:
+                    yield (status + "\n\n📧 **Sending email...**", update.report)
+                    email_result = email_report_if_requested(send_email, email_recipient, f"Stock Report: {sanitized_ticker}", update.report)
+                    if email_result:
+                        status += f"\n\n📧 {email_result}"
+                    yield (status, update.report)
                 break
             else:
                 status = format_stock_progress(update, total_elapsed)
@@ -534,7 +568,7 @@ def format_commodity_progress(update: CommodityProgressUpdate, total_elapsed: fl
     return "\n".join(lines)
 
 
-def run_commodity_research(symbol_input: str, deep_analysis: bool = False, request: gr.Request = None):
+def run_commodity_research(symbol_input: str, deep_analysis: bool = False, send_email: bool = False, email_recipient: str = "", request: gr.Request = None):
     """Generator function that yields progress updates and final report for Commodity Research."""
     if not symbol_input or symbol_input.strip() == "":
         yield (
@@ -597,6 +631,13 @@ def run_commodity_research(symbol_input: str, deep_analysis: bool = False, reque
                     status += f"\n\n📊 **Token Usage:** {update.total_tokens:,} tokens (${update.estimated_cost:.4f})"
                     status += f"\n   - Input: {update.input_tokens:,} | Output: {update.output_tokens:,}"
                 yield status, update.report
+                # Email report if requested
+                if send_email and email_recipient:
+                    yield (status + "\n\n📧 **Sending email...**", update.report)
+                    email_result = email_report_if_requested(send_email, email_recipient, f"Commodity Report: {cleaned}", update.report)
+                    if email_result:
+                        status += f"\n\n📧 {email_result}"
+                    yield (status, update.report)
                 break
             else:
                 status = format_commodity_progress(update, total_elapsed)
@@ -803,7 +844,7 @@ def run_stock_comparison(ticker1: str, ticker2: str, ticker3: str = "", request:
 # Sector Research Helper Functions
 # ============================================================
 
-def run_sector_research(sector: str, request: gr.Request = None):
+def run_sector_research(sector: str, send_email: bool = False, email_recipient: str = "", request: gr.Request = None):
     """Generator function for sector research with progress updates."""
     if not sector:
         yield "### ⚠️ Input Required\n\nPlease select a sector.", "*Select a sector to analyze...*"
@@ -862,6 +903,13 @@ def run_sector_research(sector: str, request: gr.Request = None):
                     status += f"\n\n📊 **Token Usage:** {update.total_tokens:,} tokens (${update.estimated_cost:.4f})"
                     status += f"\n   - Input: {update.input_tokens:,} | Output: {update.output_tokens:,}"
                 yield status, update.report
+                # Email report if requested
+                if send_email and email_recipient:
+                    yield (status + "\n\n📧 **Sending email...**", update.report)
+                    email_result = email_report_if_requested(send_email, email_recipient, f"Sector Report: {sector}", update.report)
+                    if email_result:
+                        status += f"\n\n📧 {email_result}"
+                    yield (status, update.report)
                 break
             elif update.stage == "error":
                 yield f"### ❌ Error\n\n{update.message}", f"Error: {update.message}"
@@ -887,7 +935,7 @@ def run_sector_research(sector: str, request: gr.Request = None):
 # Competitor Analysis Helper Functions
 # ============================================================
 
-def run_competitor_analysis(ticker: str, request: gr.Request = None):
+def run_competitor_analysis(ticker: str, send_email: bool = False, email_recipient: str = "", request: gr.Request = None):
     """Generator function for competitor analysis with progress updates."""
     if not ticker or not ticker.strip():
         yield "### ⚠️ Input Required\n\nPlease enter a ticker symbol.", "*Enter a ticker to analyze its competitors...*"
@@ -951,6 +999,13 @@ def run_competitor_analysis(ticker: str, request: gr.Request = None):
                     status += f"\n\n📊 **Token Usage:** {update.total_tokens:,} tokens (${update.estimated_cost:.4f})"
                     status += f"\n   - Input: {update.input_tokens:,} | Output: {update.output_tokens:,}"
                 yield status, update.report
+                # Email report if requested
+                if send_email and email_recipient:
+                    yield (status + "\n\n📧 **Sending email...**", update.report)
+                    email_result = email_report_if_requested(send_email, email_recipient, f"Competitor Report: {sanitized_ticker}", update.report)
+                    if email_result:
+                        status += f"\n\n📧 {email_result}"
+                    yield (status, update.report)
                 break
             elif update.stage == "error":
                 yield f"### ❌ Error\n\n{update.message}", f"Error: {update.message}"
@@ -973,7 +1028,7 @@ def run_competitor_analysis(ticker: str, request: gr.Request = None):
 # Portfolio Analysis Helper Functions
 # ============================================================
 
-def run_portfolio_analysis(portfolio_text: str, request: gr.Request = None):
+def run_portfolio_analysis(portfolio_text: str, send_email: bool = False, email_recipient: str = "", request: gr.Request = None):
     """Generator function for portfolio analysis with progress updates."""
     if not portfolio_text or not portfolio_text.strip():
         yield "### ⚠️ Input Required\n\nPlease enter your portfolio holdings.", "*Enter your holdings to analyze...*"
@@ -1032,6 +1087,13 @@ def run_portfolio_analysis(portfolio_text: str, request: gr.Request = None):
                     status += f"\n\n📊 **Token Usage:** {update.total_tokens:,} tokens (${update.estimated_cost:.4f})"
                     status += f"\n   - Input: {update.input_tokens:,} | Output: {update.output_tokens:,}"
                 yield status, update.report
+                # Email report if requested
+                if send_email and email_recipient:
+                    yield (status + "\n\n📧 **Sending email...**", update.report)
+                    email_result = email_report_if_requested(send_email, email_recipient, "Portfolio Report", update.report)
+                    if email_result:
+                        status += f"\n\n📧 {email_result}"
+                    yield (status, update.report)
                 break
             elif update.stage == "error":
                 yield f"### ❌ Error\n\n{update.message}", f"Error: {update.message}"
@@ -1186,7 +1248,7 @@ def format_ai_research_progress(update: AIResearchProgressUpdate, total_elapsed:
     return "\n".join(lines)
 
 
-def run_ai_research(query: str, depth: int, max_searches: int, request: gr.Request = None):
+def run_ai_research(query: str, depth: int, max_searches: int, send_email: bool = False, email_recipient: str = "", request: gr.Request = None):
     """Generator function that yields progress updates and final report for AI Research."""
     # Input validation
     if not query or query.strip() == "":
@@ -1278,6 +1340,13 @@ def run_ai_research(query: str, depth: int, max_searches: int, request: gr.Reque
                     status += f"\n\n📊 **Token Usage:** {update.total_tokens:,} tokens (${update.estimated_cost:.4f})"
                     status += f"\n   - Input: {update.input_tokens:,} | Output: {update.output_tokens:,}"
                 yield status, update.report
+                # Email report if requested
+                if send_email and email_recipient:
+                    yield (status + "\n\n📧 **Sending email...**", update.report)
+                    email_result = email_report_if_requested(send_email, email_recipient, f"AI Research: {sanitized_query[:80]}", update.report)
+                    if email_result:
+                        status += f"\n\n📧 {email_result}"
+                    yield (status, update.report)
                 break
             else:
                 status = format_ai_research_progress(update, total_elapsed)
@@ -1594,6 +1663,21 @@ with gr.Blocks(title="Research Agent Hub", theme=gr.themes.Soft()) as demo:
                         research_submit_btn = gr.Button("🚀 Start Research", variant="primary", scale=2)
                         research_clear_btn = gr.Button("🗑️ Clear", scale=1)
 
+                    with gr.Row():
+                        research_email_checkbox = gr.Checkbox(
+                            label="📧 Email Report",
+                            value=AUTO_EMAIL_REPORTS,
+                            interactive=not AUTO_EMAIL_REPORTS,
+                            info="Auto-email is ON" if AUTO_EMAIL_REPORTS else "Send report to email when complete"
+                        )
+                        research_email_input = gr.Textbox(
+                            label="Recipient",
+                            value=DEFAULT_EMAIL_RECIPIENT,
+                            placeholder="email@example.com",
+                            max_lines=1,
+                            scale=2
+                        )
+
                 with gr.Column(scale=1):
                     research_status = gr.Markdown(
                         value="### ⏳ Ready\n\nEnter a query and click **Start Research**",
@@ -1623,7 +1707,7 @@ with gr.Blocks(title="Research Agent Hub", theme=gr.themes.Soft()) as demo:
             # Deep Research button actions
             research_submit_btn.click(
                 fn=run_research_with_progress,
-                inputs=[query_input, research_depth_slider, research_max_searches],
+                inputs=[query_input, research_depth_slider, research_max_searches, research_email_checkbox, research_email_input],
                 outputs=[research_status, research_output]
             )
 
@@ -1715,6 +1799,21 @@ with gr.Blocks(title="Research Agent Hub", theme=gr.themes.Soft()) as demo:
                         ai_submit_btn = gr.Button("🚀 Start AI Research", variant="primary", scale=2)
                         ai_clear_btn = gr.Button("🗑️ Clear", scale=1)
 
+                    with gr.Row():
+                        ai_email_checkbox = gr.Checkbox(
+                            label="📧 Email Report",
+                            value=AUTO_EMAIL_REPORTS,
+                            interactive=not AUTO_EMAIL_REPORTS,
+                            info="Auto-email is ON" if AUTO_EMAIL_REPORTS else "Send report to email when complete"
+                        )
+                        ai_email_input = gr.Textbox(
+                            label="Recipient",
+                            value=DEFAULT_EMAIL_RECIPIENT,
+                            placeholder="email@example.com",
+                            max_lines=1,
+                            scale=2
+                        )
+
                     gr.Examples(
                         examples=[
                             "Latest advances in reasoning models and their enterprise applications",
@@ -1752,7 +1851,7 @@ with gr.Blocks(title="Research Agent Hub", theme=gr.themes.Soft()) as demo:
             # AI Research button actions
             ai_submit_btn.click(
                 fn=run_ai_research,
-                inputs=[ai_query_input, ai_depth_slider, ai_max_searches],
+                inputs=[ai_query_input, ai_depth_slider, ai_max_searches, ai_email_checkbox, ai_email_input],
                 outputs=[ai_status, ai_output]
             )
 
@@ -1839,6 +1938,21 @@ with gr.Blocks(title="Research Agent Hub", theme=gr.themes.Soft()) as demo:
                         stock_submit_btn = gr.Button("🚀 Generate Report", variant="primary", scale=2)
                         stock_clear_btn = gr.Button("🗑️ Clear", scale=1)
 
+                    with gr.Row():
+                        stock_email_checkbox = gr.Checkbox(
+                            label="📧 Email Report",
+                            value=AUTO_EMAIL_REPORTS,
+                            interactive=not AUTO_EMAIL_REPORTS,
+                            info="Auto-email is ON" if AUTO_EMAIL_REPORTS else "Send report to email when complete"
+                        )
+                        stock_email_input = gr.Textbox(
+                            label="Recipient",
+                            value=DEFAULT_EMAIL_RECIPIENT,
+                            placeholder="email@example.com",
+                            max_lines=1,
+                            scale=2
+                        )
+
                     gr.Examples(
                         examples=["AAPL", "TSLA", "MSFT", "NVDA", "GOOGL", "AMZN", "META"],
                         inputs=ticker_input,
@@ -1901,7 +2015,7 @@ with gr.Blocks(title="Research Agent Hub", theme=gr.themes.Soft()) as demo:
             # Stock Research button actions
             stock_submit_btn.click(
                 fn=run_stock_research,
-                inputs=[ticker_input, stock_deep_analysis],
+                inputs=[ticker_input, stock_deep_analysis, stock_email_checkbox, stock_email_input],
                 outputs=[stock_status, stock_output]
             )
 
@@ -1912,7 +2026,7 @@ with gr.Blocks(title="Research Agent Hub", theme=gr.themes.Soft()) as demo:
 
             ticker_input.submit(
                 fn=run_stock_research,
-                inputs=[ticker_input, stock_deep_analysis],
+                inputs=[ticker_input, stock_deep_analysis, stock_email_checkbox, stock_email_input],
                 outputs=[stock_status, stock_output]
             )
 
@@ -2084,6 +2198,21 @@ with gr.Blocks(title="Research Agent Hub", theme=gr.themes.Soft()) as demo:
 
                     sector_submit_btn = gr.Button("🏭 Analyze Sector", variant="primary")
 
+                    with gr.Row():
+                        sector_email_checkbox = gr.Checkbox(
+                            label="📧 Email Report",
+                            value=AUTO_EMAIL_REPORTS,
+                            interactive=not AUTO_EMAIL_REPORTS,
+                            info="Auto-email is ON" if AUTO_EMAIL_REPORTS else "Send report to email when complete"
+                        )
+                        sector_email_input = gr.Textbox(
+                            label="Recipient",
+                            value=DEFAULT_EMAIL_RECIPIENT,
+                            placeholder="email@example.com",
+                            max_lines=1,
+                            scale=2
+                        )
+
                     # Sector quick info
                     gr.Markdown("**Available Sectors:** Technology, Semiconductors, Healthcare, Financial Services, Energy, Consumer Discretionary, Industrials, Real Estate")
 
@@ -2099,7 +2228,7 @@ with gr.Blocks(title="Research Agent Hub", theme=gr.themes.Soft()) as demo:
 
             sector_submit_btn.click(
                 fn=run_sector_research,
-                inputs=[sector_dropdown],
+                inputs=[sector_dropdown, sector_email_checkbox, sector_email_input],
                 outputs=[sector_status, sector_output]
             )
 
@@ -2122,6 +2251,21 @@ with gr.Blocks(title="Research Agent Hub", theme=gr.themes.Soft()) as demo:
 
                     competitor_submit_btn = gr.Button("🎯 Analyze Competitors", variant="primary")
 
+                    with gr.Row():
+                        competitor_email_checkbox = gr.Checkbox(
+                            label="📧 Email Report",
+                            value=AUTO_EMAIL_REPORTS,
+                            interactive=not AUTO_EMAIL_REPORTS,
+                            info="Auto-email is ON" if AUTO_EMAIL_REPORTS else "Send report to email when complete"
+                        )
+                        competitor_email_input = gr.Textbox(
+                            label="Recipient",
+                            value=DEFAULT_EMAIL_RECIPIENT,
+                            placeholder="email@example.com",
+                            max_lines=1,
+                            scale=2
+                        )
+
                     gr.Examples(
                         examples=["NVDA", "AAPL", "TSLA", "JPM", "AMZN", "NFLX"],
                         inputs=competitor_ticker_input,
@@ -2140,13 +2284,13 @@ with gr.Blocks(title="Research Agent Hub", theme=gr.themes.Soft()) as demo:
 
             competitor_submit_btn.click(
                 fn=run_competitor_analysis,
-                inputs=[competitor_ticker_input],
+                inputs=[competitor_ticker_input, competitor_email_checkbox, competitor_email_input],
                 outputs=[competitor_status, competitor_output]
             )
 
             competitor_ticker_input.submit(
                 fn=run_competitor_analysis,
-                inputs=[competitor_ticker_input],
+                inputs=[competitor_ticker_input, competitor_email_checkbox, competitor_email_input],
                 outputs=[competitor_status, competitor_output]
             )
 
@@ -2174,6 +2318,21 @@ with gr.Blocks(title="Research Agent Hub", theme=gr.themes.Soft()) as demo:
                     with gr.Row():
                         portfolio_submit_btn = gr.Button("💼 Analyze Portfolio", variant="primary", scale=2)
                         portfolio_clear_btn = gr.Button("🗑️ Clear", scale=1)
+
+                    with gr.Row():
+                        portfolio_email_checkbox = gr.Checkbox(
+                            label="📧 Email Report",
+                            value=AUTO_EMAIL_REPORTS,
+                            interactive=not AUTO_EMAIL_REPORTS,
+                            info="Auto-email is ON" if AUTO_EMAIL_REPORTS else "Send report to email when complete"
+                        )
+                        portfolio_email_input = gr.Textbox(
+                            label="Recipient",
+                            value=DEFAULT_EMAIL_RECIPIENT,
+                            placeholder="email@example.com",
+                            max_lines=1,
+                            scale=2
+                        )
 
                     # CSV Upload option
                     with gr.Accordion("📁 Or Upload CSV", open=False):
@@ -2213,7 +2372,7 @@ with gr.Blocks(title="Research Agent Hub", theme=gr.themes.Soft()) as demo:
 
             portfolio_submit_btn.click(
                 fn=run_portfolio_analysis,
-                inputs=[portfolio_input],
+                inputs=[portfolio_input, portfolio_email_checkbox, portfolio_email_input],
                 outputs=[portfolio_status, portfolio_output]
             )
 
@@ -2327,6 +2486,21 @@ with gr.Blocks(title="Research Agent Hub", theme=gr.themes.Soft()) as demo:
                         commodity_submit_btn = gr.Button("🚀 Generate Report", variant="primary", scale=2)
                         commodity_clear_btn = gr.Button("🗑️ Clear", scale=1)
 
+                    with gr.Row():
+                        commodity_email_checkbox = gr.Checkbox(
+                            label="📧 Email Report",
+                            value=AUTO_EMAIL_REPORTS,
+                            interactive=not AUTO_EMAIL_REPORTS,
+                            info="Auto-email is ON" if AUTO_EMAIL_REPORTS else "Send report to email when complete"
+                        )
+                        commodity_email_input = gr.Textbox(
+                            label="Recipient",
+                            value=DEFAULT_EMAIL_RECIPIENT,
+                            placeholder="email@example.com",
+                            max_lines=1,
+                            scale=2
+                        )
+
                     gr.Examples(
                         examples=["gold", "silver", "crude", "natgas", "copper", "corn", "wheat"],
                         inputs=commodity_input,
@@ -2354,13 +2528,13 @@ with gr.Blocks(title="Research Agent Hub", theme=gr.themes.Soft()) as demo:
             # Event handlers
             commodity_submit_btn.click(
                 fn=run_commodity_research,
-                inputs=[commodity_input, commodity_deep_analysis],
+                inputs=[commodity_input, commodity_deep_analysis, commodity_email_checkbox, commodity_email_input],
                 outputs=[commodity_status, commodity_output]
             )
 
             commodity_input.submit(
                 fn=run_commodity_research,
-                inputs=[commodity_input, commodity_deep_analysis],
+                inputs=[commodity_input, commodity_deep_analysis, commodity_email_checkbox, commodity_email_input],
                 outputs=[commodity_status, commodity_output]
             )
 
@@ -2369,11 +2543,12 @@ with gr.Blocks(title="Research Agent Hub", theme=gr.themes.Soft()) as demo:
                 outputs=[commodity_input, commodity_status, commodity_output, commodity_pdf_file]
             )
 
-            # Copy button (clipboard JS)
+            # Copy to clipboard (uses JavaScript)
             commodity_copy_btn.click(
-                fn=None,
+                fn=lambda report: report,
                 inputs=[commodity_output],
-                js="(text) => { navigator.clipboard.writeText(text); }"
+                outputs=[],
+                js="(report) => { navigator.clipboard.writeText(report); alert('Report copied to clipboard!'); return []; }"
             )
 
             # PDF export
