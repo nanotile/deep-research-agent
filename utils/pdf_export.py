@@ -22,6 +22,20 @@ except ImportError:
     logger.warning("fpdf2 not installed. PDF export will be disabled.")
 
 
+def _get_unicode_font_path() -> Optional[str]:
+    """Find a Unicode-capable TTF font on the system."""
+    candidates = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+        "/usr/share/fonts/TTF/DejaVuSans.ttf",
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    return None
+
+
 class ResearchReportPDF(FPDF):
     """Custom PDF class for research reports with headers/footers."""
 
@@ -29,10 +43,30 @@ class ResearchReportPDF(FPDF):
         super().__init__()
         self.report_title = title
         self.set_auto_page_break(auto=True, margin=15)
+        self._setup_fonts()
+
+    def _setup_fonts(self):
+        """Register a Unicode font if available, otherwise fall back to Helvetica."""
+        font_path = _get_unicode_font_path()
+        if font_path:
+            self.add_font("UniSans", "", font_path, uni=True)
+            # Register bold variant if available, otherwise reuse regular
+            bold_path = font_path.replace("Sans.ttf", "Sans-Bold.ttf").replace("Regular.ttf", "Bold.ttf")
+            self.add_font("UniSans", "B", bold_path if os.path.exists(bold_path) else font_path, uni=True)
+            # Italic/BoldItalic: reuse regular/bold (DejaVu Sans has no oblique on many systems)
+            self.add_font("UniSans", "I", font_path, uni=True)
+            self.add_font("UniSans", "BI", bold_path if os.path.exists(bold_path) else font_path, uni=True)
+            self._font_family = "UniSans"
+        else:
+            self._font_family = "Helvetica"
+
+    @property
+    def font_name(self):
+        return self._font_family
 
     def header(self):
         """Add header to each page."""
-        self.set_font("Helvetica", "B", 10)
+        self.set_font(self.font_name, "B", 10)
         self.set_text_color(100, 100, 100)
         self.cell(0, 10, self.report_title, align="L")
         self.cell(0, 10, datetime.now().strftime("%Y-%m-%d"), align="R", new_x="LMARGIN", new_y="NEXT")
@@ -42,7 +76,7 @@ class ResearchReportPDF(FPDF):
     def footer(self):
         """Add footer with page number."""
         self.set_y(-15)
-        self.set_font("Helvetica", "I", 8)
+        self.set_font(self.font_name, "I", 8)
         self.set_text_color(128, 128, 128)
         self.cell(0, 10, f"Page {self.page_no()}/{{nb}}", align="C")
 
@@ -140,6 +174,9 @@ def markdown_to_pdf(
         table_rows = []
 
         for section_type, content in sections:
+          try:
+            # Reset x to left margin before each section
+            pdf.set_x(pdf.l_margin)
             # Clean content of markdown formatting
             clean_content = _strip_markdown(content)
 
@@ -148,7 +185,7 @@ def markdown_to_pdf(
                     _render_table(pdf, table_rows)
                     table_rows = []
                     in_table = False
-                pdf.set_font("Helvetica", "B", 16)
+                pdf.set_font(pdf.font_name, "B", 16)
                 pdf.set_text_color(0, 51, 102)
                 pdf.ln(5)
                 pdf.multi_cell(0, 8, clean_content)
@@ -159,7 +196,7 @@ def markdown_to_pdf(
                     _render_table(pdf, table_rows)
                     table_rows = []
                     in_table = False
-                pdf.set_font("Helvetica", "B", 14)
+                pdf.set_font(pdf.font_name, "B", 14)
                 pdf.set_text_color(0, 51, 102)
                 pdf.ln(4)
                 pdf.multi_cell(0, 7, clean_content)
@@ -170,7 +207,7 @@ def markdown_to_pdf(
                     _render_table(pdf, table_rows)
                     table_rows = []
                     in_table = False
-                pdf.set_font("Helvetica", "B", 12)
+                pdf.set_font(pdf.font_name, "B", 12)
                 pdf.set_text_color(51, 51, 51)
                 pdf.ln(3)
                 pdf.multi_cell(0, 6, clean_content)
@@ -181,7 +218,7 @@ def markdown_to_pdf(
                     _render_table(pdf, table_rows)
                     table_rows = []
                     in_table = False
-                pdf.set_font("Helvetica", "BI", 11)
+                pdf.set_font(pdf.font_name, "BI", 11)
                 pdf.set_text_color(51, 51, 51)
                 pdf.ln(2)
                 pdf.multi_cell(0, 6, clean_content)
@@ -192,19 +229,19 @@ def markdown_to_pdf(
                     _render_table(pdf, table_rows)
                     table_rows = []
                     in_table = False
-                pdf.set_font("Helvetica", "", 10)
+                pdf.set_font(pdf.font_name, "", 10)
                 pdf.set_text_color(0, 0, 0)
-                pdf.cell(5)  # Indent
-                pdf.multi_cell(0, 5, f"• {clean_content}")
+                pdf.set_x(pdf.l_margin + 5)
+                pdf.multi_cell(0, 5, f"- {clean_content}")
 
             elif section_type == 'numbered':
                 if in_table:
                     _render_table(pdf, table_rows)
                     table_rows = []
                     in_table = False
-                pdf.set_font("Helvetica", "", 10)
+                pdf.set_font(pdf.font_name, "", 10)
                 pdf.set_text_color(0, 0, 0)
-                pdf.cell(5)  # Indent
+                pdf.set_x(pdf.l_margin + 5)
                 pdf.multi_cell(0, 5, clean_content)
 
             elif section_type == 'table_row':
@@ -229,9 +266,9 @@ def markdown_to_pdf(
                     _render_table(pdf, table_rows)
                     table_rows = []
                     in_table = False
-                pdf.set_font("Helvetica", "I", 10)
+                pdf.set_font(pdf.font_name, "I", 10)
                 pdf.set_text_color(80, 80, 80)
-                pdf.cell(10)  # Indent
+                pdf.set_x(pdf.l_margin + 10)
                 pdf.multi_cell(0, 5, clean_content)
                 pdf.set_text_color(0, 0, 0)
 
@@ -240,7 +277,7 @@ def markdown_to_pdf(
                     _render_table(pdf, table_rows)
                     table_rows = []
                     in_table = False
-                pdf.set_font("Helvetica", "", 10)
+                pdf.set_font(pdf.font_name, "", 10)
                 pdf.set_text_color(0, 0, 0)
                 pdf.multi_cell(0, 5, clean_content)
 
@@ -251,43 +288,51 @@ def markdown_to_pdf(
                     in_table = False
                 pdf.ln(2)
 
+          except Exception as e:
+            logger.warning(f"PDF: skipping section '{section_type}': {e}")
+            continue
+
         # Render any remaining table
         if in_table and table_rows:
             _render_table(pdf, table_rows)
 
-        # Determine output path
+        # Determine output path - use Gradio's upload folder for proper file serving
         if output_path is None:
-            # Create temp file
-            fd, output_path = tempfile.mkstemp(suffix='.pdf', prefix='research_report_')
-            os.close(fd)
+            gradio_tmp = os.path.join(tempfile.gettempdir(), "gradio", "pdf_exports")
+            os.makedirs(gradio_tmp, exist_ok=True)
+            os.chmod(gradio_tmp, 0o755)
+            filename = generate_report_filename(title, "report")
+            output_path = os.path.join(gradio_tmp, filename)
 
         # Save PDF
         pdf.output(output_path)
+        os.chmod(output_path, 0o644)
         logger.info(f"PDF generated: {output_path}")
 
         return output_path
 
     except Exception as e:
-        logger.error(f"Failed to generate PDF: {e}")
+        logger.error(f"Failed to generate PDF: {e}", exc_info=True)
         return None
 
 
-def _render_table(pdf: FPDF, rows: list):
+def _render_table(pdf, rows: list):
     """Render a markdown table as PDF table."""
     if not rows:
         return
 
-    pdf.ln(3)
-    pdf.set_font("Helvetica", "", 9)
+    try:
+        pdf.ln(3)
+        num_cols = max(len(row) for row in rows)
+        # Cap columns to avoid tiny widths
+        if num_cols > 8:
+            rows = [row[:8] for row in rows]
+            num_cols = 8
+        page_width = 190
+        col_width = page_width / num_cols
 
-    # Calculate column widths
-    num_cols = max(len(row) for row in rows)
-    page_width = 190  # Available width
-    col_width = page_width / num_cols
-
-    # First row is header
-    if rows:
-        pdf.set_font("Helvetica", "B", 9)
+        # Header row
+        pdf.set_font(pdf.font_name, "B", 9)
         pdf.set_fill_color(240, 240, 240)
         for cell in rows[0]:
             clean_cell = _strip_markdown(cell)
@@ -295,14 +340,17 @@ def _render_table(pdf: FPDF, rows: list):
         pdf.ln()
 
         # Data rows
-        pdf.set_font("Helvetica", "", 9)
+        pdf.set_font(pdf.font_name, "", 9)
         for row in rows[1:]:
-            for i, cell in enumerate(row):
+            for cell in row:
                 clean_cell = _strip_markdown(cell)
                 pdf.cell(col_width, 5, clean_cell[:30], border=1)
             pdf.ln()
 
-    pdf.ln(2)
+        pdf.ln(2)
+    except Exception as e:
+        logger.warning(f"PDF: skipping table: {e}")
+        pdf.ln(2)
 
 
 def generate_report_filename(ticker_or_query: str, report_type: str = "research") -> str:

@@ -42,3 +42,4 @@ test_output/
 Untitled-1.yaml
 my_vm_config.json
 .cache/
+certs/

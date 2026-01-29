@@ -1491,7 +1491,7 @@ with gr.Blocks(title="Research Agent Hub", theme=gr.themes.Soft()) as demo:
             with gr.Row():
                 research_copy_btn = gr.Button("📋 Copy Report", scale=1)
                 research_pdf_btn = gr.Button("📄 Download PDF", scale=1)
-                research_pdf_download = gr.File(label="PDF Download", visible=False)
+                research_pdf_file = gr.File(label="PDF Download", visible=True, interactive=False)
 
             # Report History
             with gr.Accordion("📚 Report History", open=False):
@@ -1531,7 +1531,7 @@ with gr.Blocks(title="Research Agent Hub", theme=gr.themes.Soft()) as demo:
             research_pdf_btn.click(
                 fn=export_research_pdf,
                 inputs=[research_output, query_input],
-                outputs=[research_pdf_download]
+                outputs=[research_pdf_file]
             )
 
             with gr.Accordion("📋 Instructions & Requirements", open=False):
@@ -1626,7 +1626,7 @@ with gr.Blocks(title="Research Agent Hub", theme=gr.themes.Soft()) as demo:
                 drive_btn_label = "📁 Save to Drive" if is_drive_configured() else "📁 Save to Drive (Not configured)"
                 ai_drive_btn = gr.Button(drive_btn_label, scale=1)
                 ai_pdf_btn = gr.Button("📄 Download PDF", scale=1)
-                ai_pdf_download = gr.File(label="PDF Download", visible=False)
+                ai_pdf_file = gr.File(label="PDF Download", visible=True, interactive=False)
 
             # Drive save status
             ai_drive_status = gr.Markdown(value="", visible=True)
@@ -1659,7 +1659,7 @@ with gr.Blocks(title="Research Agent Hub", theme=gr.themes.Soft()) as demo:
             ai_pdf_btn.click(
                 fn=export_ai_pdf,
                 inputs=[ai_output, ai_query_input],
-                outputs=[ai_pdf_download]
+                outputs=[ai_pdf_file]
             )
 
             with gr.Accordion("📋 Source Tiers & Features", open=False):
@@ -1742,7 +1742,7 @@ with gr.Blocks(title="Research Agent Hub", theme=gr.themes.Soft()) as demo:
             with gr.Row():
                 stock_copy_btn = gr.Button("📋 Copy Report", scale=1)
                 stock_pdf_btn = gr.Button("📄 Download PDF", scale=1)
-                stock_pdf_download = gr.File(label="PDF Download", visible=False)
+                stock_pdf_file = gr.File(label="PDF Download", visible=True, interactive=False)
 
             # Watchlist Section
             with gr.Accordion("⭐ Watchlist", open=False):
@@ -1815,7 +1815,7 @@ with gr.Blocks(title="Research Agent Hub", theme=gr.themes.Soft()) as demo:
             stock_pdf_btn.click(
                 fn=export_stock_pdf,
                 inputs=[stock_output, ticker_input],
-                outputs=[stock_pdf_download]
+                outputs=[stock_pdf_file]
             )
 
             # Watchlist handlers (simplified - uses default session)
@@ -2310,10 +2310,30 @@ with gr.Blocks(title="Research Agent Hub", theme=gr.themes.Soft()) as demo:
 
 
 # Launch the app
+def get_external_ip() -> str:
+    """Fetch the VM's external IP address."""
+    import urllib.request
+    services = [
+        "https://api.ipify.org",
+        "https://ifconfig.me/ip",
+        "https://checkip.amazonaws.com",
+    ]
+    for url in services:
+        try:
+            with urllib.request.urlopen(url, timeout=3) as resp:
+                return resp.read().decode().strip()
+        except Exception:
+            continue
+    return "unknown"
+
+
 if __name__ == "__main__":
     logger.info("=" * 70)
     logger.info("RESEARCH AGENT HUB")
     logger.info("=" * 70)
+
+    # Detect external IP for GCP VMs with non-static IPs
+    external_ip = get_external_ip()
 
     # Check for authentication credentials
     gradio_username = os.getenv("GRADIO_USERNAME", "").strip()
@@ -2329,8 +2349,23 @@ if __name__ == "__main__":
 
     logger.info(f"Rate Limiting: {RATE_LIMIT_MAX_REQUESTS} requests per {RATE_LIMIT_WINDOW_SECONDS} seconds")
     logger.info("Starting unified interface on port 7860...")
-    logger.info("Access at: http://0.0.0.0:7860")
+    logger.info(f"Local:    http://0.0.0.0:7860")
+    logger.info(f"External: http://{external_ip}:7860")
     logger.info("=" * 70)
+
+    # SSL for HTTPS (required for clipboard API and clean PDF downloads)
+    ssl_certfile = os.path.join(os.path.dirname(__file__), "certs", "cert.pem")
+    ssl_keyfile = os.path.join(os.path.dirname(__file__), "certs", "key.pem")
+    ssl_kwargs = {}
+    if os.path.exists(ssl_certfile) and os.path.exists(ssl_keyfile):
+        ssl_kwargs = {
+            "ssl_certfile": ssl_certfile,
+            "ssl_keyfile": ssl_keyfile,
+            "ssl_verify": False,
+        }
+        logger.info("SSL: ENABLED (HTTPS)")
+    else:
+        logger.info("SSL: DISABLED (HTTP only — clipboard and PDF download may not work in Chrome)")
 
     demo.launch(
         server_name="0.0.0.0",
@@ -2338,4 +2373,6 @@ if __name__ == "__main__":
         share=False,
         show_error=True,
         auth=auth,
+        allowed_paths=["/tmp"],
+        **ssl_kwargs,
     )
