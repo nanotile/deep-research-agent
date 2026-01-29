@@ -2317,6 +2317,13 @@ with gr.Blocks(title="Research Agent Hub", theme=gr.themes.Soft()) as demo:
                     )
 
                     with gr.Row():
+                        commodity_deep_analysis = gr.Checkbox(
+                            label="Deep Analysis",
+                            value=False,
+                            info="Include macro context and extended news analysis"
+                        )
+
+                    with gr.Row():
                         commodity_submit_btn = gr.Button("🚀 Generate Report", variant="primary", scale=2)
                         commodity_clear_btn = gr.Button("🗑️ Clear", scale=1)
 
@@ -2341,7 +2348,8 @@ with gr.Blocks(title="Research Agent Hub", theme=gr.themes.Soft()) as demo:
             with gr.Row():
                 commodity_copy_btn = gr.Button("📋 Copy Report", scale=1)
                 commodity_pdf_btn = gr.Button("📄 Download PDF", scale=1)
-                commodity_pdf_file = gr.File(label="PDF Download", visible=True, interactive=False)
+
+            commodity_pdf_file = gr.File(label="PDF Download", visible=False, interactive=False)
 
             # Event handlers
             commodity_submit_btn.click(
@@ -2357,8 +2365,8 @@ with gr.Blocks(title="Research Agent Hub", theme=gr.themes.Soft()) as demo:
             )
 
             commodity_clear_btn.click(
-                lambda: ("", "### ⏳ Ready\n\nEnter a commodity and click **Generate Report**", "*Your commodity research report will appear here...*"),
-                outputs=[commodity_input, commodity_status, commodity_output]
+                lambda: ("", "### ⏳ Ready\n\nEnter a commodity and click **Generate Report**", "*Your commodity research report will appear here...*", gr.update(visible=False)),
+                outputs=[commodity_input, commodity_status, commodity_output, commodity_pdf_file]
             )
 
             # Copy button (clipboard JS)
@@ -2371,14 +2379,14 @@ with gr.Blocks(title="Research Agent Hub", theme=gr.themes.Soft()) as demo:
             # PDF export
             def export_commodity_pdf(report_md):
                 if not report_md or report_md.startswith("*Your"):
-                    return None
+                    return gr.update(value=None, visible=False)
                 try:
                     filename = generate_report_filename("commodity", "report")
                     pdf_path = markdown_to_pdf(report_md, filename)
-                    return pdf_path
+                    return gr.update(value=pdf_path, visible=True)
                 except Exception as e:
                     logger.error(f"PDF export error: {e}")
-                    return None
+                    return gr.update(value=None, visible=False)
 
             commodity_pdf_btn.click(
                 fn=export_commodity_pdf,

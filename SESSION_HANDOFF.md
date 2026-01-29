@@ -1,37 +1,42 @@
-# Session Handoff - January 29, 2026
+# Session Handoff - January 29, 2026 (Evening)
 
 ## What Was Done This Session
 
-### 1. Committed Previously Uncommitted Files (3 separate commits)
-- `20d9f8b` — **AI Research Agent**: `agents/ai_research_agent.py`, `models/ai_research_models.py`, `services/ai_domain_context.py`
-- `143e019` — **Google Drive Export**: `services/google_drive_service.py`, `services/__init__.py`, `.env.example`, `requirements.txt`
-- `92a42f0` — **CLAUDE.md**: Rewrote with architectural patterns, agent conventions, new agents
+### 1. Built Commodity/Futures Research Agent (`edec0df`)
+Full implementation of a new research agent for commodity markets. Tested with gold (2 sources) and crude oil (3 sources including FRED). All working end-to-end.
 
-### 2. Tested Recursive Research Features in UI
-- **Deep Research** at depth=2: Working (gold & silver futures query)
-- **Stock Research** with deep_analysis=True: Working (NVDA)
-- **Stock Research** standard: Working (CAVA, TSLA, LLY)
+**New files created:**
+- `models/commodity_data_models.py` — Pydantic models: CommodityPriceData, YFinanceCommodityData, AlphaVantageCommodityData, FREDMacroData, CommodityDataBundle, CommodityAnalysis, CommodityThesis, CommodityProgressUpdate, OutlookType/TrendStrength enums
+- `services/commodity_data_fetchers.py` — COMMODITY_SYMBOLS registry (10 commodities), validate_commodity_symbol() with fuzzy matching, yfinance/Alpha Vantage/FRED/Tavily fetchers, parallel fetch_all_commodity_data()
+- `services/commodity_context_2026.py` — 2026 macro context injection (Fed policy, USD outlook, inflation, geopolitical), category-specific context (precious metals, energy, industrial metals, agriculture)
+- `agents/commodity_research_agent.py` — Full agent with COMMODITY_ANALYSIS_TOOL, analyze_commodity_data(), write_commodity_report(), dual entry points (commodity_research + commodity_research_with_progress), CLI via `python -m agents.commodity_research_agent`
 
-### 3. Fixed PDF Export (`084c344`)
-- **Font issue**: Switched from Helvetica (ASCII-only) to DejaVu Sans (Unicode) — fixed `"Character '•' not supported"` crash
-- **Cursor bleed**: Added `pdf.set_x(pdf.l_margin)` reset before each section — fixed `"Not enough horizontal space"` errors
-- **Resilience**: Wrapped each section in try/except so problematic sections are skipped instead of failing the whole PDF
-- **Files**: `utils/pdf_export.py`
+**Modified files:**
+- `unified_app.py` — Commodities tab with input, Deep Analysis checkbox, examples, status, report, Copy + PDF buttons
+- `requirements.txt` — Added `fredapi>=0.5.0`
+- `.env.example` — Added `FRED_API_KEY`
+- `agents/__init__.py` — Exported commodity_research, commodity_research_with_progress
 
-### 4. Added HTTPS Support (`084c344`)
-- **Problem**: Chrome over plain HTTP wouldn't finalize PDF downloads (`.crdownload`) and `navigator.clipboard.writeText` requires secure context
-- **Solution**: Self-signed SSL cert in `certs/` directory, auto-detected at launch
-- **Config**: `ssl_verify=False` for Gradio's internal health check with self-signed certs
-- **Files**: `unified_app.py`, `certs/cert.pem`, `certs/key.pem` (gitignored)
+**Supported commodities:** gold, silver, platinum, crude, brent, natgas, copper, corn, wheat, soybeans
 
-### 5. Added External IP Logging on Startup
-- `get_external_ip()` queries ipify/ifconfig.me/checkip.amazonaws.com
-- Logs both local and external URL at startup
-- **File**: `unified_app.py`
+### 2. UI Fixes (uncommitted)
+- Added **Deep Analysis checkbox** to Commodities tab (was missing)
+- Fixed **PDF Download widget** — hidden by default (`visible=False`), appears only after clicking Download PDF. Clear button hides it again. Moved out of button row into its own row.
 
-### 6. PDF Download UI Fix
-- Changed from `gr.File(visible=False)` toggle pattern to `gr.File(visible=True, interactive=False)` — always-visible download area
-- Applied to all three tabs (Deep Research, AI Research, Stock Research)
+### 3. CLI Test Results
+- **Gold:** Bullish 75%, strong trend, $4,800-$6,200 target, 2 sources (yfinance + Tavily)
+- **Crude Oil WTI:** Bullish 72%, moderate trend, $68-$76 target, 3 sources (yfinance + FRED + Tavily)
+- FRED macro data working: DXY 119.29, 10Y 4.24%, Fed funds 3.72%, CPI 3.03%
+
+---
+
+## Known Issues
+
+### PDF Download on Commodities Tab
+- Download PDF button has intermittent issues — may be internet/connection related. Same PDF export code as stock tab. Investigate next session.
+
+### Deep Analysis Checkbox (Commodities)
+- Checkbox is present in UI but not yet wired to the agent — the `run_commodity_research()` function doesn't pass it through yet. The commodity agent doesn't have gap identification/follow-up search like the stock agent. For now it's a UI placeholder. Wire it up or remove it next session.
 
 ---
 
@@ -53,13 +58,8 @@
    ./auto_shutdown.sh --install
    ```
 
-4. **Set up Docker auto-restart**:
-   ```bash
-   docker run -d --restart=unless-stopped -p 7860:7860 --env-file .env --name research-hub research-agent-hub
-   ```
-
 ### Future Plans
-- **Commodities/Futures Agent** — dedicated agent for gold, silver, futures tracking (COT data, macro drivers, supply/demand). For now, use ETF proxies: GLD, SLV, GDX, GOLD
+- Wire up Deep Analysis for commodity agent (gap identification + follow-up searches)
 - User considering local development with NVIDIA GPU
 - **Hunting for RTX 3090 build** at $900-1100
 - Target specs: RTX 3090 (24GB), 32GB+ RAM, 750W+ PSU
@@ -78,7 +78,13 @@
 ### App Status
 - **Running:** https://34.16.99.182:7860 (self-signed cert, click Advanced > Proceed)
 - **Process:** unified_app.py on port 7860 (HTTPS)
-- **SSL:** Self-signed cert in `certs/` (gitignored, regenerate with `openssl req -x509 -newkey rsa:2048 -keyout certs/key.pem -out certs/cert.pem -days 365 -nodes -subj "/CN=<IP>"`)
+- **SSL:** Self-signed cert in `certs/` (gitignored)
+
+### API Keys Configured
+- ANTHROPIC_API_KEY, TAVILY_API_KEY, RESEND_API_KEY
+- FINNHUB_API_KEY, ALPHA_VANTAGE_API_KEY, SEC_EDGAR_USER_AGENT
+- FRED_API_KEY (new this session)
+- GOOGLE_SERVICE_ACCOUNT_FILE, GOOGLE_DRIVE_FOLDER_ID
 
 ---
 
@@ -86,7 +92,8 @@
 
 - **Repo:** https://github.com/nanotile/deep-research-agent
 - **Branch:** main (up to date with remote)
-- **Latest Commit:** `084c344` - Fix PDF export and add HTTPS support for Chrome compatibility
+- **Latest Commit:** `edec0df` - Add Commodity/Futures Research Agent with FRED macro data
+- **Uncommitted:** UI fixes (Deep Analysis checkbox, PDF widget visibility)
 
 ---
 
@@ -96,13 +103,14 @@ Paste this to start:
 
 ```
 Continue from SESSION_HANDOFF.md - Last session we:
-1. Committed AI Research Agent, Google Drive export, updated CLAUDE.md
-2. Tested recursive research in UI — deep research depth=2 and stock deep analysis both working
-3. Fixed PDF export (Unicode fonts, cursor bleed, resilience)
-4. Added HTTPS via self-signed cert (fixes Chrome clipboard + PDF downloads)
-5. All committed and pushed (084c344)
+1. Built and deployed Commodity/Futures Research Agent (gold, crude, copper, etc.)
+2. 4 new files + 4 modified files, committed and pushed (edec0df)
+3. CLI tested gold (bullish 75%) and crude (bullish 72%, FRED macro working)
+4. UI working on Commodities tab — Deep Analysis checkbox added, PDF widget fixed
+5. Uncommitted: UI fixes for Deep Analysis checkbox + PDF visibility
 
 Pending:
+- Fix/investigate PDF download intermittent issue on Commodities tab
+- Wire up Deep Analysis checkbox (or remove if not needed)
 - GCP cost optimization (delete snapshots, install auto-shutdown)
-- Commodities/Futures Agent (future build, use GLD/SLV ETFs for now)
 ```
