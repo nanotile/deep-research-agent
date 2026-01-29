@@ -1,63 +1,37 @@
-# Session Handoff - January 28, 2026
+# Session Handoff - January 29, 2026
 
 ## What Was Done This Session
 
-### 1. Implemented Recursive Research Pattern for Deep Research Agent
-- **Files Modified:** `agents/deep_research_agent.py`, `unified_app.py`
-- **New Features:**
-  - `DeepResearchState` dataclass for state management across recursive depths
-  - `LEARNING_EXTRACTION_TOOL` - Claude tool for structured gap identification
-  - `extract_learnings()` - Analyzes search results, extracts insights, identifies knowledge gaps
-  - `generate_followup_searches()` - Creates follow-up queries from identified gaps
-  - Updated `deep_research()` and `deep_research_with_progress()` with `depth` and `max_searches` parameters
-- **UI Changes:**
-  - Added "Research Depth" slider (1-3, default 1) to Deep Research tab
-  - Added "Max Searches" slider (3-15, default 6)
-  - Progress display shows depth tracking when depth > 1
-- **Backward Compatible:** `depth=1` preserves original single-pass behavior
+### 1. Committed Previously Uncommitted Files (3 separate commits)
+- `20d9f8b` — **AI Research Agent**: `agents/ai_research_agent.py`, `models/ai_research_models.py`, `services/ai_domain_context.py`
+- `143e019` — **Google Drive Export**: `services/google_drive_service.py`, `services/__init__.py`, `.env.example`, `requirements.txt`
+- `92a42f0` — **CLAUDE.md**: Rewrote with architectural patterns, agent conventions, new agents
 
-### 2. Implemented Recursive Research Pattern for Stock Research Agent
-- **Files Modified:** `agents/stock_research_agent.py`, `unified_app.py`
-- **New Features:**
-  - `STOCK_GAP_TOOL` - Claude tool for categorized gap identification (competitive_position, catalyst, risk, financials, management, regulatory)
-  - `identify_stock_gaps()` - Reviews preliminary analysis to find gaps needing follow-up
-  - `targeted_stock_search()` - Executes focused searches for identified gaps
-  - Updated `stock_research()` and `stock_research_with_progress()` with `deep_analysis` parameter
-  - Report now includes "Deep Analysis: Follow-up Research" section when enabled
-- **UI Changes:**
-  - Added "Deep Analysis" checkbox to Stock Research tab
-  - Progress display shows new stages: "Identifying Gaps", "Follow-up Research"
-- **Backward Compatible:** `deep_analysis=False` preserves original behavior
+### 2. Tested Recursive Research Features in UI
+- **Deep Research** at depth=2: Working (gold & silver futures query)
+- **Stock Research** with deep_analysis=True: Working (NVDA)
+- **Stock Research** standard: Working (CAVA, TSLA, LLY)
 
-### 3. Commit & Push
-- **Commit:** `edc83c5` - Add recursive research pattern to Deep Research and Stock Research agents
-- **Status:** Pushed to main branch
+### 3. Fixed PDF Export (`084c344`)
+- **Font issue**: Switched from Helvetica (ASCII-only) to DejaVu Sans (Unicode) — fixed `"Character '•' not supported"` crash
+- **Cursor bleed**: Added `pdf.set_x(pdf.l_margin)` reset before each section — fixed `"Not enough horizontal space"` errors
+- **Resilience**: Wrapped each section in try/except so problematic sections are skipped instead of failing the whole PDF
+- **Files**: `utils/pdf_export.py`
 
----
+### 4. Added HTTPS Support (`084c344`)
+- **Problem**: Chrome over plain HTTP wouldn't finalize PDF downloads (`.crdownload`) and `navigator.clipboard.writeText` requires secure context
+- **Solution**: Self-signed SSL cert in `certs/` directory, auto-detected at launch
+- **Config**: `ssl_verify=False` for Gradio's internal health check with self-signed certs
+- **Files**: `unified_app.py`, `certs/cert.pem`, `certs/key.pem` (gitignored)
 
-## How the Recursive Research Works
+### 5. Added External IP Logging on Startup
+- `get_external_ip()` queries ipify/ifconfig.me/checkip.amazonaws.com
+- Logs both local and external URL at startup
+- **File**: `unified_app.py`
 
-### Deep Research (depth > 1)
-```
-Query → plan_searches() → execute_searches() → extract_learnings()
-                                ↓
-                    [if gaps and depth < max_depth]
-                                ↓
-                    generate_followup_searches() → execute_searches() → ...
-                                ↓
-                         write_report()
-```
-
-### Stock Research (deep_analysis=True)
-```
-Ticker → fetch_all_stock_data() → analyze_stock_data() → identify_stock_gaps()
-                                ↓
-                    [if gaps found]
-                                ↓
-                    targeted_stock_search() → incorporate findings
-                                ↓
-                         write_stock_report()
-```
+### 6. PDF Download UI Fix
+- Changed from `gr.File(visible=False)` toggle pattern to `gr.File(visible=True, interactive=False)` — always-visible download area
+- Applied to all three tabs (Deep Research, AI Research, Stock Research)
 
 ---
 
@@ -85,22 +59,10 @@ Ticker → fetch_all_stock_data() → analyze_stock_data() → identify_stock_ga
    ```
 
 ### Future Plans
+- **Commodities/Futures Agent** — dedicated agent for gold, silver, futures tracking (COT data, macro drivers, supply/demand). For now, use ETF proxies: GLD, SLV, GDX, GOLD
 - User considering local development with NVIDIA GPU
 - **Hunting for RTX 3090 build** at $900-1100
 - Target specs: RTX 3090 (24GB), 32GB+ RAM, 750W+ PSU
-
----
-
-## Uncommitted Files (From Other Work)
-
-These files were modified/created but not part of the recursive research commit:
-- `.env.example` - Modified
-- `requirements.txt` - Modified
-- `services/__init__.py` - Modified
-- `agents/ai_research_agent.py` - New (AI Research Agent)
-- `models/ai_research_models.py` - New
-- `services/ai_domain_context.py` - New
-- `services/google_drive_service.py` - New
 
 ---
 
@@ -111,11 +73,12 @@ These files were modified/created but not part of the recursive research commit:
 - **Zone:** us-central1-a
 - **Type:** N2 custom (4 vCPU, 23.25 GB)
 - **Disk:** 350GB pd-standard (220GB used)
-- **IP:** 136.119.213.222
+- **IP:** 34.16.99.182 (non-static, check on startup)
 
 ### App Status
-- **Running:** http://136.119.213.222:7860
-- **Process:** unified_app.py on port 7860
+- **Running:** https://34.16.99.182:7860 (self-signed cert, click Advanced > Proceed)
+- **Process:** unified_app.py on port 7860 (HTTPS)
+- **SSL:** Self-signed cert in `certs/` (gitignored, regenerate with `openssl req -x509 -newkey rsa:2048 -keyout certs/key.pem -out certs/cert.pem -days 365 -nodes -subj "/CN=<IP>"`)
 
 ---
 
@@ -123,7 +86,7 @@ These files were modified/created but not part of the recursive research commit:
 
 - **Repo:** https://github.com/nanotile/deep-research-agent
 - **Branch:** main (up to date with remote)
-- **Latest Commit:** `edc83c5` - Add recursive research pattern
+- **Latest Commit:** `084c344` - Fix PDF export and add HTTPS support for Chrome compatibility
 
 ---
 
@@ -133,12 +96,13 @@ Paste this to start:
 
 ```
 Continue from SESSION_HANDOFF.md - Last session we:
-1. Implemented recursive research pattern for Deep Research Agent (depth slider 1-3)
-2. Implemented gap detection + follow-up research for Stock Research Agent (deep analysis checkbox)
-3. All code committed and pushed (edc83c5)
+1. Committed AI Research Agent, Google Drive export, updated CLAUDE.md
+2. Tested recursive research in UI — deep research depth=2 and stock deep analysis both working
+3. Fixed PDF export (Unicode fonts, cursor bleed, resilience)
+4. Added HTTPS via self-signed cert (fixes Chrome clipboard + PDF downloads)
+5. All committed and pushed (084c344)
 
 Pending:
-- Test the new recursive features in the UI
 - GCP cost optimization (delete snapshots, install auto-shutdown)
-- Uncommitted files: AI Research Agent and related services
+- Commodities/Futures Agent (future build, use GLD/SLV ETFs for now)
 ```
