@@ -359,4 +359,4 @@ def generate_report_filename(ticker_or_query: str, report_type: str = "research"
     clean_name = re.sub(r'[^\w\s-]', '', ticker_or_query)[:30]
     clean_name = clean_name.replace(' ', '_')
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return f"{report_type}_{clean_name}_{timestamp}.pdf"
+    return f"{clean_name}_{timestamp}.pdf"

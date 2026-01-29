@@ -601,6 +601,8 @@ def run_commodity_research(symbol_input: str, deep_analysis: bool = False, send_
 
     start_time = time.time()
     report = f"*Researching {cleaned}...*"
+    final_report = ""
+    final_status = ""
 
     yield (
         f"### ⏳ Starting Research\n\nInitializing research for **{cleaned}**...",
@@ -623,21 +625,15 @@ def run_commodity_research(symbol_input: str, deep_analysis: bool = False, send_
             total_elapsed = time.time() - start_time
 
             if update.stage == "complete":
-                status = f"### ✅ Research Complete!\n\n**Total time:** {total_elapsed:.1f}s"
+                final_status = f"### ✅ Research Complete!\n\n**Total time:** {total_elapsed:.1f}s"
                 if update.analysis:
                     outlook = update.analysis.outlook.value.upper()
-                    status += f"\n\n**Outlook:** {outlook}"
+                    final_status += f"\n\n**Outlook:** {outlook}"
                 if update.total_tokens > 0:
-                    status += f"\n\n📊 **Token Usage:** {update.total_tokens:,} tokens (${update.estimated_cost:.4f})"
-                    status += f"\n   - Input: {update.input_tokens:,} | Output: {update.output_tokens:,}"
-                yield status, update.report
-                # Email report if requested
-                if send_email and email_recipient:
-                    yield (status + "\n\n📧 **Sending email...**", update.report)
-                    email_result = email_report_if_requested(send_email, email_recipient, f"Commodity Report: {cleaned}", update.report)
-                    if email_result:
-                        status += f"\n\n📧 {email_result}"
-                    yield (status, update.report)
+                    final_status += f"\n\n📊 **Token Usage:** {update.total_tokens:,} tokens (${update.estimated_cost:.4f})"
+                    final_status += f"\n   - Input: {update.input_tokens:,} | Output: {update.output_tokens:,}"
+                final_report = update.report
+                yield final_status, final_report
                 break
             else:
                 status = format_commodity_progress(update, total_elapsed)
@@ -648,12 +644,20 @@ def run_commodity_research(symbol_input: str, deep_analysis: bool = False, send_
 
     thread.join()
 
+    # Email report if requested (outside try/except to avoid silent failures)
+    if send_email and email_recipient and final_report and not final_report.startswith("*"):
+        yield (final_status + "\n\n📧 **Sending email...**", final_report)
+        email_result = email_report_if_requested(send_email, email_recipient, f"Commodity Report: {cleaned}", final_report)
+        if email_result:
+            final_status += f"\n\n📧 {email_result}"
+        yield (final_status, final_report)
+
 
 # ============================================================
 # Stock Comparison Helper Functions
 # ============================================================
 
-def run_stock_comparison(ticker1: str, ticker2: str, ticker3: str = "", request: gr.Request = None):
+def run_stock_comparison(ticker1: str, ticker2: str, ticker3: str = "", send_email: bool = False, email_recipient: str = "", request: gr.Request = None):
     """
     Run comparison analysis for 2-3 stocks.
     Fetches data for each stock and creates a comparison table.
@@ -837,6 +841,13 @@ def run_stock_comparison(ticker1: str, ticker2: str, ticker3: str = "", request:
 """
 
     status = f"### ✅ Comparison Complete\n\nCompared {len(stock_data)} stocks"
+
+    # Email report if requested
+    if send_email and email_recipient:
+        email_result = email_report_if_requested(send_email, email_recipient, f"Stock Comparison: {' vs '.join(tickers)}", comparison_md)
+        if email_result:
+            status += f"\n\n📧 {email_result}"
+
     return status, comparison_md
 
 
@@ -1366,7 +1377,7 @@ def run_ai_research(query: str, depth: int, max_searches: int, send_email: bool 
 # Earnings Calendar Helper Functions
 # ============================================================
 
-def run_earnings_analysis(tickers_input: str, include_sentiment: bool, request: gr.Request = None):
+def run_earnings_analysis(tickers_input: str, include_sentiment: bool, send_email: bool = False, email_recipient: str = "", request: gr.Request = None):
     """Generator function for earnings calendar with progress updates."""
     if not tickers_input or not tickers_input.strip():
         yield "### ⚠️ Input Required\n\nPlease enter ticker symbols.", "*Enter tickers to analyze earnings...*"
@@ -1409,6 +1420,8 @@ def run_earnings_analysis(tickers_input: str, include_sentiment: bool, request: 
 
     start_time = time.time()
     report = f"*Analyzing earnings for {len(tickers)} ticker(s)...*"
+    final_report = ""
+    final_status = ""
     last_message = "Initializing..."
     last_stage = "Starting"
 
@@ -1427,17 +1440,18 @@ def run_earnings_analysis(tickers_input: str, include_sentiment: bool, request: 
             last_stage = update.stage_display
 
             if update.stage == "complete":
-                status = f"### ✅ Complete!\n\n**Total time:** {total_elapsed:.1f}s\n\n**Tickers analyzed:** {update.tickers_processed}"
+                final_status = f"### ✅ Complete!\n\n**Total time:** {total_elapsed:.1f}s\n\n**Tickers analyzed:** {update.tickers_processed}"
                 if update.total_tokens > 0:
-                    status += f"\n\n📊 **Token Usage:** {update.total_tokens:,} tokens (${update.estimated_cost:.4f})"
-                    status += f"\n   - Input: {update.input_tokens:,} | Output: {update.output_tokens:,}"
+                    final_status += f"\n\n📊 **Token Usage:** {update.total_tokens:,} tokens (${update.estimated_cost:.4f})"
+                    final_status += f"\n   - Input: {update.input_tokens:,} | Output: {update.output_tokens:,}"
                 # Save to cache
                 db_cache.save_report(
                     report_type='earnings',
                     query=', '.join(tickers),
                     report_content=update.report
                 )
-                yield status, update.report
+                final_report = update.report
+                yield final_status, final_report
                 break
             elif update.stage == "error":
                 yield f"### ❌ Error\n\n{update.message}", f"Error: {update.message}"
@@ -1457,6 +1471,14 @@ def run_earnings_analysis(tickers_input: str, include_sentiment: bool, request: 
                 yield status, report
 
     thread.join()
+
+    # Email report if requested (outside try/except to avoid silent failures)
+    if send_email and email_recipient and final_report and not final_report.startswith("*"):
+        yield (final_status + "\n\n📧 **Sending email...**", final_report)
+        email_result = email_report_if_requested(send_email, email_recipient, f"Earnings Report: {', '.join(tickers)}", final_report)
+        if email_result:
+            final_status += f"\n\n📧 {email_result}"
+        yield (final_status, final_report)
 
 
 # ============================================================
@@ -1554,8 +1576,8 @@ def cancel_alert_by_id(alert_id: str):
         return f"### ❌ Error\n\n{e}", get_alerts_display()
 
 
-def run_alert_check():
-    """Manually run alert check."""
+def run_alert_check(send_email: bool = False, email_recipient: str = ""):
+    """Manually run alert check and optionally email results."""
     try:
         import asyncio
         triggered = asyncio.run(check_all_alerts())
@@ -1563,9 +1585,22 @@ def run_alert_check():
             result = f"### ✅ Alert Check Complete\n\n**{len(triggered)} alert(s) triggered:**\n\n"
             for r in triggered:
                 result += f"- {r.alert.ticker}: {r.message}\n"
-            return result, get_alerts_display()
         else:
-            return "### ✅ Alert Check Complete\n\nNo alerts triggered.", get_alerts_display()
+            result = "### ✅ Alert Check Complete\n\nNo alerts triggered."
+
+        # Email report if requested
+        if send_email and email_recipient and email_recipient.strip():
+            report_content = result.replace("### ", "").replace("**", "")
+            email_result = email_report_if_requested(
+                send_email,
+                email_recipient,
+                "Alert Check Results",
+                report_content
+            )
+            if email_result:
+                result += f"\n\n📧 {email_result}"
+
+        return result, get_alerts_display()
     except Exception as e:
         logger.error(f"Error running alert check: {e}")
         return f"### ❌ Error\n\n{e}", get_alerts_display()
@@ -2145,6 +2180,21 @@ with gr.Blocks(title="Research Agent Hub", theme=gr.themes.Soft()) as demo:
 
             compare_btn = gr.Button("⚖️ Compare Stocks", variant="primary")
 
+            with gr.Row():
+                compare_email_checkbox = gr.Checkbox(
+                    label="📧 Email Report",
+                    value=AUTO_EMAIL_REPORTS,
+                    interactive=not AUTO_EMAIL_REPORTS,
+                    info="Auto-email is ON" if AUTO_EMAIL_REPORTS else "Send report to email when complete"
+                )
+                compare_email_input = gr.Textbox(
+                    label="Recipient",
+                    value=DEFAULT_EMAIL_RECIPIENT,
+                    placeholder="email@example.com",
+                    max_lines=1,
+                    scale=2
+                )
+
             compare_status = gr.Markdown(
                 value="### ⏳ Ready\n\nEnter 2-3 ticker symbols to compare"
             )
@@ -2175,7 +2225,7 @@ with gr.Blocks(title="Research Agent Hub", theme=gr.themes.Soft()) as demo:
 
             compare_btn.click(
                 fn=run_stock_comparison,
-                inputs=[compare_ticker1, compare_ticker2, compare_ticker3],
+                inputs=[compare_ticker1, compare_ticker2, compare_ticker3, compare_email_checkbox, compare_email_input],
                 outputs=[compare_status, compare_output]
             )
 
@@ -2414,6 +2464,21 @@ with gr.Blocks(title="Research Agent Hub", theme=gr.themes.Soft()) as demo:
                         earnings_submit_btn = gr.Button("📅 Analyze Earnings", variant="primary", scale=2)
                         earnings_clear_btn = gr.Button("🗑️ Clear", scale=1)
 
+                    with gr.Row():
+                        earnings_email_checkbox = gr.Checkbox(
+                            label="📧 Email Report",
+                            value=AUTO_EMAIL_REPORTS,
+                            interactive=not AUTO_EMAIL_REPORTS,
+                            info="Auto-email is ON" if AUTO_EMAIL_REPORTS else "Send report to email when complete"
+                        )
+                        earnings_email_input = gr.Textbox(
+                            label="Recipient",
+                            value=DEFAULT_EMAIL_RECIPIENT,
+                            placeholder="email@example.com",
+                            max_lines=1,
+                            scale=2
+                        )
+
                 with gr.Column(scale=1):
                     earnings_status = gr.Markdown(
                         value="### ⏳ Ready\n\nEnter ticker symbols and click **Analyze Earnings**",
@@ -2443,7 +2508,7 @@ with gr.Blocks(title="Research Agent Hub", theme=gr.themes.Soft()) as demo:
 
             earnings_submit_btn.click(
                 fn=run_earnings_analysis,
-                inputs=[earnings_tickers, earnings_sentiment],
+                inputs=[earnings_tickers, earnings_sentiment, earnings_email_checkbox, earnings_email_input],
                 outputs=[earnings_status, earnings_output]
             )
 
@@ -2475,6 +2540,18 @@ with gr.Blocks(title="Research Agent Hub", theme=gr.themes.Soft()) as demo:
                         scale=2
                     )
 
+                    gr.Examples(
+                        examples=[
+                            "gold", "silver", "platinum", "palladium",
+                            "crude", "brent", "natgas", "gasoline", "uranium",
+                            "copper", "aluminum", "nickel", "zinc",
+                            "corn", "wheat", "soybeans", "coffee", "cocoa",
+                            "sugar", "cotton", "lumber", "cattle",
+                        ],
+                        inputs=commodity_input,
+                        label="Popular Commodities"
+                    )
+
                     with gr.Row():
                         commodity_deep_analysis = gr.Checkbox(
                             label="Deep Analysis",
@@ -2500,12 +2577,6 @@ with gr.Blocks(title="Research Agent Hub", theme=gr.themes.Soft()) as demo:
                             max_lines=1,
                             scale=2
                         )
-
-                    gr.Examples(
-                        examples=["gold", "silver", "crude", "natgas", "copper", "corn", "wheat"],
-                        inputs=commodity_input,
-                        label="Popular Commodities"
-                    )
 
                 with gr.Column(scale=1):
                     commodity_status = gr.Markdown(
@@ -2552,20 +2623,22 @@ with gr.Blocks(title="Research Agent Hub", theme=gr.themes.Soft()) as demo:
             )
 
             # PDF export
-            def export_commodity_pdf(report_md):
+            def export_commodity_pdf(report_md, commodity_name):
                 if not report_md or report_md.startswith("*Your"):
                     return gr.update(value=None, visible=False)
                 try:
-                    filename = generate_report_filename("commodity", "report")
-                    pdf_path = markdown_to_pdf(report_md, filename)
-                    return gr.update(value=pdf_path, visible=True)
+                    title = f"Commodity Report: {commodity_name}" if commodity_name else "Commodity Report"
+                    pdf_path = export_report_to_pdf(report_md, title)
+                    if pdf_path:
+                        return gr.update(value=pdf_path, visible=True)
+                    return gr.update(value=None, visible=False)
                 except Exception as e:
                     logger.error(f"PDF export error: {e}")
                     return gr.update(value=None, visible=False)
 
             commodity_pdf_btn.click(
                 fn=export_commodity_pdf,
-                inputs=[commodity_output],
+                inputs=[commodity_output, commodity_input],
                 outputs=[commodity_pdf_file]
             )
 
@@ -2581,6 +2654,21 @@ with gr.Blocks(title="Research Agent Hub", theme=gr.themes.Soft()) as demo:
             - Email notifications require `RESEND_API_KEY` in your `.env` file
             - With Resend free tier, emails can only be sent to your verified email address
             """)
+
+            with gr.Row():
+                alerts_email_checkbox = gr.Checkbox(
+                    label="📧 Email Report",
+                    value=AUTO_EMAIL_REPORTS,
+                    interactive=not AUTO_EMAIL_REPORTS,
+                    info="Auto-email is ON" if AUTO_EMAIL_REPORTS else "Send report to email when complete"
+                )
+                alerts_email_input = gr.Textbox(
+                    label="Recipient",
+                    value=DEFAULT_EMAIL_RECIPIENT,
+                    placeholder="email@example.com",
+                    max_lines=1,
+                    scale=2
+                )
 
             with gr.Row():
                 # Left column - Create alerts
@@ -2603,6 +2691,7 @@ with gr.Blocks(title="Research Agent Hub", theme=gr.themes.Soft()) as demo:
                         )
                         price_alert_email = gr.Textbox(
                             label="Email",
+                            value=DEFAULT_EMAIL_RECIPIENT,
                             placeholder="your@email.com"
                         )
                         price_alert_btn = gr.Button("📈 Create Price Alert", variant="primary")
@@ -2621,6 +2710,7 @@ with gr.Blocks(title="Research Agent Hub", theme=gr.themes.Soft()) as demo:
                         )
                         earnings_alert_email = gr.Textbox(
                             label="Email",
+                            value=DEFAULT_EMAIL_RECIPIENT,
                             placeholder="your@email.com"
                         )
                         earnings_alert_btn = gr.Button("📅 Create Earnings Alert", variant="primary")
@@ -2679,6 +2769,7 @@ with gr.Blocks(title="Research Agent Hub", theme=gr.themes.Soft()) as demo:
 
             check_alerts_btn.click(
                 fn=run_alert_check,
+                inputs=[alerts_email_checkbox, alerts_email_input],
                 outputs=[alert_status, alerts_display]
             )
 
